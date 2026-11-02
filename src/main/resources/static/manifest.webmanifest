@@ -1,0 +1,14 @@
+{
+  "name": "Expense Tracker",
+  "short_name": "Gastos",
+  "description": "Controle de gastos, receitas e orçamentos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1113",
+  "theme_color": "#2f7d6d",
+  "lang": "pt-BR",
+  "icons": [
+    {"src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}

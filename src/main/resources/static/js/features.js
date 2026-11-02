@@ -1,0 +1,1010 @@
+'use strict';
+
+/* Accounts, payment methods, recurring payments, pots ("caixinhas") and the wish list.
+   Loaded after app.js; it reuses its helpers ($, api, openSheet, run, state, ...). */
+
+/* ---------- Shared helpers ---------- */
+const ACCOUNT_TYPES = {
+    CHECKING: 'Conta corrente', SAVINGS: 'Poupança', WALLET: 'Carteira / dinheiro',
+    CREDIT_CARD: 'Cartão de crédito', INVESTMENT: 'Investimentos'
+};
+const ACCOUNT_ICONS = ['bank', 'wallet', 'cash', 'credit-card', 'trending'];
+const POT_ICONS = ['coins', 'gift', 'home', 'target', 'sparkles', 'leaf', 'book', 'gamepad', 'tv', 'bus'];
+
+const fmtInput = v => (v == null ? '' : String(v).replace('.', ','));
+const activeAccounts = () => state.accounts.filter(a => !a.archived);
+/** The main account: the oldest active one (the same the server uses when none is given). */
+const mainAccountId = () => activeAccounts().reduce((m, a) => (m == null || a.id < m ? a.id : m), null);
+const accountById = id => state.accounts.find(a => a.id === id);
+const nextId = value => (value === '' || value == null ? null : Number(value));
+
+function options(list, selected, {none = null} = {}) {
+    return (none ? `<option value="">${esc(none)}</option>` : '')
+        + list.map(x => `<option value="${x.id}" ${x.id === selected ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+}
+
+/** Account select: active accounts plus the one currently chosen, even if archived. */
+function accountOptions(selected, {exclude} = {}) {
+    const list = orderedAccounts(state.accounts.filter(a => (!a.archived || a.id === selected) && a.id !== exclude));
+    return list.map(a => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('');
+}
+
+/** "Nubank › Caixinha" for a part of an account, just the name otherwise. */
+const accountLabel = a => (a.parentName ? `${a.parentName} › ${a.name}` : a.name);
+const byName = (a, b) => a.name.localeCompare(b.name, LOCALE);
+
+/** Accounts in display order: each top-level account followed by its parts ("cofrinhos"). */
+function orderedAccounts(list = state.accounts) {
+    const roots = list.filter(a => !a.parentId).sort(byName);
+    const result = [];
+    roots.forEach(r => {
+        result.push(r);
+        list.filter(a => a.parentId === r.id).sort(byName).forEach(c => result.push(c));
+    });
+    list.filter(a => a.parentId && !list.some(r => r.id === a.parentId)).forEach(a => result.push(a));
+    return result;
+}
+
+function monthOptions(months, selected, {none = null} = {}) {
+    return (none ? `<option value="">${esc(none)}</option>` : '')
+        + months.map(m => `<option value="${m}" ${m === selected ? 'selected' : ''}>${esc(monthLabel(m))}</option>`).join('');
+}
+const monthRange = (fromYm, count) => Array.from({length: count}, (_, i) => shiftMonth(fromYm, i));
+
+/* Dates are typed as dd/mm/aaaa or picked from our own calendar (U2). The same field works in the browser and in the
+   desktop WebView, which has no usable native date picker. */
+function dateField(id, iso, label = 'Data') {
+    return `<div class="field"><label for="${id}">${label}</label>
+        <div class="date-row"><input id="${id}" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" value="${esc(isoToBr(iso))}">
+            <button type="button" class="icon-btn small date-cal" data-cal="${id}" aria-label="Abrir calendário">${ico('calendar')}</button></div>
+        <span class="date-quick" data-for="${id}"><button type="button" data-days="0">Hoje</button><button type="button" data-days="-1">Ontem</button></span></div>`;
+}
+/** Wires the field created by dateField() and returns a function that reads it as yyyy-mm-dd ('' if invalid). */
+function bindDate(sheet, id) {
+    const input = $('#' + id, sheet);
+    input.addEventListener('input', () => {
+        const digits = input.value.replace(/\D/g, '').slice(0, 8);
+        input.value = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
+    });
+    $$(`.date-quick[data-for="${id}"] button`, sheet).forEach(b => b.onclick = () => {
+        input.value = isoToBr(shiftIso(todayIso(), Number(b.dataset.days)));
+    });
+    const calendarButton = $(`[data-cal="${id}"]`, sheet);
+    if (calendarButton) calendarButton.onclick = () => openCalendar(input);
+    return () => brToIso(input.value);
+}
+
+/** The calendar for a date field. It opens over the form (in the confirmation layer), so the form keeps what was typed. */
+function openCalendar(input) {
+    const root = $('#confirm-root');
+    const today = todayIso();
+    let shown = (brToIso(input.value) || today).slice(0, 7);
+    const weekdays = Array.from({length: 7}, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(LOCALE, {weekday: 'short'}).replace('.', ''));
+    const close = () => {
+        root.innerHTML = '';
+        document.removeEventListener('keydown', onKey, true);
+        input.focus();
+    };
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const paint = () => {
+        const [y, m] = shown.split('-').map(Number);
+        const selected = brToIso(input.value);
+        const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7; // weeks start on Monday
+        const cells = Array.from({length: offset}, () => '<span></span>');
+        for (let d = 1; d <= new Date(y, m, 0).getDate(); d++) {
+            const iso = `${y}-${pad(m)}-${pad(d)}`;
+            cells.push(`<button type="button" class="cal-day ${iso === selected ? 'selected' : ''} ${iso === today ? 'today' : ''}" data-iso="${iso}" aria-label="${isoToBr(iso)}" ${iso === selected ? 'aria-current="date"' : ''}>${d}</button>`);
+        }
+        root.innerHTML = `<div class="overlay confirm-overlay"><div class="sheet calendar" role="dialog" aria-modal="true" aria-label="Escolher data">
+            <div class="cal-head"><button type="button" class="back-btn" id="cal-prev" aria-label="Mês anterior">${ico('chevron-left')}</button>
+                <strong>${esc(monthLabel(shown))}</strong>
+                <button type="button" class="back-btn" id="cal-next" aria-label="Próximo mês">${ico('chevron-right')}</button></div>
+            <div class="cal-grid">${weekdays.map(w => `<span class="cal-wd">${esc(w)}</span>`).join('')}${cells.join('')}</div>
+            <div class="form-actions"><button type="button" class="btn" id="cal-close">Fechar</button></div>
+        </div></div>`;
+        $('#cal-prev', root).onclick = () => { shown = shiftMonth(shown, -1); paint(); };
+        $('#cal-next', root).onclick = () => { shown = shiftMonth(shown, 1); paint(); };
+        $$('.cal-day', root).forEach(b => b.onclick = () => {
+            input.value = isoToBr(b.dataset.iso);
+            input.dispatchEvent(new Event('input')); // lets the filters react as they do to typing
+            close();
+        });
+        $('#cal-close', root).onclick = close;
+        $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) close(); });
+    };
+    paint();
+    document.addEventListener('keydown', onKey, true);
+    const start = $('.cal-day.selected', root) || $('.cal-day.today', root) || $('#cal-next', root);
+    start.focus();
+}
+
+/* ---------- Colours (U7) ---------- */
+/** Colours offered for categories, accounts and pots: a palette in place of the system colour picker, which differs
+    between the browser and the desktop WebView. */
+const COLOR_CHOICES = ['#2F7D6D', '#5C6BC0', '#E07A3F', '#C2557A', '#6A9F3C', '#3D8FC4', '#9A6BB5', '#B08D2A',
+    '#E57373', '#64B5F6', '#FFB74D', '#81C784', '#4DB6AC', '#7986CB', '#A1887F', '#90A4AE'];
+
+/** Paints the swatches into {@code container} and returns a function with the chosen colour. */
+function colorPicker(sheet, container, current) {
+    let value = current;
+    const choices = COLOR_CHOICES.includes(current) || !current ? COLOR_CHOICES : [current, ...COLOR_CHOICES];
+    const paint = () => {
+        $(container, sheet).innerHTML = choices.map(c =>
+            `<button type="button" class="swatch ${c === value ? 'active' : ''}" data-color="${esc(c)}" style="background:${esc(c)}" aria-label="${esc(c)}" aria-pressed="${c === value}"></button>`).join('');
+        $$('.swatch', sheet).forEach(b => b.onclick = () => { value = b.dataset.color; paint(); });
+    };
+    paint();
+    return () => value;
+}
+
+function iconPicker(sheet, container, choices, current) {
+    let value = current;
+    const choicesWithCurrent = choices.includes(current) || !current ? choices : [current, ...choices];
+    const paint = () => {
+        $(container, sheet).innerHTML = choicesWithCurrent.map(k =>
+            `<button type="button" class="icon-opt ${k === value ? 'active' : ''}" data-icon="${esc(k)}" aria-label="${esc(k)}">${ico(k)}</button>`).join('');
+        $$('.icon-opt', sheet).forEach(b => b.onclick = () => { value = b.dataset.icon; paint(); });
+    };
+    paint();
+    return () => value;
+}
+
+function pageHeader(title, back = true) {
+    return `<div class="page-head">${back ? `<button class="back-btn" id="back" aria-label="Voltar">${ico('chevron-left')}</button>` : ''}<h2>${esc(title)}</h2></div>`;
+}
+function bindBack() {
+    const back = $('#back');
+    if (back) back.onclick = () => { state.sub = null; render(); window.scrollTo({top: 0}); };
+}
+function menuRow(sub, icon, title, detail) {
+    return `<button class="row" data-sub="${sub}"><span class="avatar" style="background:var(--surface-2)">${ico(icon)}</span>
+        <span class="grow"><span class="title">${esc(title)}</span>${detail ? `<span class="small muted">${esc(detail)}</span>` : ''}</span>
+        <span class="muted">${ico('chevron-right')}</span></button>`;
+}
+const statusLabel = o => o.status === 'PAID' ? `Pago em ${isoToBr(o.paidDate)}` : o.status === 'SKIPPED' ? 'Pulado' : `Vence em ${isoToBr(o.dueDate)}`;
+
+/* ---------- Account filter (top bar) ---------- */
+function paintAccountButton() {
+    const btn = $('#account-btn');
+    const acc = accountById(state.accountFilter);
+    btn.innerHTML = `${ico(acc ? (acc.icon || 'bank') : 'layers')}<span>${esc(acc ? accountLabel(acc) : 'Todas as contas')}</span>`;
+    btn.onclick = openAccountPicker;
+}
+
+function openAccountPicker() {
+    const active = activeAccounts();
+    const available = active.filter(a => !a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const saved = active.filter(a => a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const check = ico('check');
+    const sheet = openSheet(`<h2>Ver lançamentos de</h2>
+        <div class="list">
+            <button class="row" data-acc=""><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
+                <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null ? check : ''}</button>
+            ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}">${avatar(a.icon || 'bank', a.color)}
+                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${esc(ACCOUNT_TYPES[a.type])} · ${money(a.balance)}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
+        </div>`);
+    $$('[data-acc]', sheet).forEach(b => b.onclick = () => {
+        state.accountFilter = nextId(b.dataset.acc);
+        safeStorage.set('account', b.dataset.acc);
+        closeSheet();
+        loadAll();
+    });
+}
+
+/* ---------- Home: what is due ---------- */
+function dueSection() {
+    const today = todayIso();
+    const monthEnd = `${state.month}-31`; // lexicographically after every date of the month
+    const inScope = id => !state.accountFilter || id === state.accountFilter;
+    const items = [];
+    state.occurrences.filter(o => o.status === 'PENDING' && inScope(o.accountId))
+        .forEach(o => items.push({date: o.dueDate, occ: o}));
+    state.pendingAll.filter(t => t.date <= monthEnd && inScope(t.accountId))
+        .forEach(t => items.push({date: t.date, tx: t}));
+    if (!items.length) return '';
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    const when = (date, income) => `${date < today ? 'Venceu' : income ? 'Previsto' : 'Vence'} em ${isoToBr(date)}`;
+    const rows = items.map(it => {
+        if (it.occ) {
+            const o = it.occ;
+            return `<button class="row" data-occ="${o.id}">
+                ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
+                <span class="grow"><span class="title">${esc(o.name)}</span>
+                    <span class="small ${o.dueDate < today ? 'expense' : 'muted'}">${when(o.dueDate, o.type === 'INCOME')} · ${esc(o.accountName)}</span></span>
+                <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? money(o.amount) : 'a informar'}</span></button>`;
+        }
+        const t = it.tx;
+        return `<button class="row" data-id="${t.id}">
+            ${avatar(t.categoryIcon, t.categoryColor)}
+            <span class="grow"><span class="title">${esc(t.name)}</span>
+                <span class="small ${t.date < today ? 'expense' : 'muted'}">${when(t.date, t.type === 'INCOME')} · ${esc(t.accountName)}</span></span>
+            <span class="amount ${t.type === 'INCOME' ? 'income' : 'expense'}">${money(t.amount)}</span></button>`;
+    });
+    return `<h2 class="section-title">A pagar e a receber</h2><div class="list">${rows.join('')}</div>`;
+}
+function bindDueRows(root) {
+    $$('[data-occ]', root).forEach(r => r.onclick = () => {
+        const o = state.occurrences.find(x => String(x.id) === r.dataset.occ);
+        if (o) openOccurrenceSheet(o);
+    });
+}
+
+function openOccurrenceSheet(o) {
+    const paid = o.status === 'PAID', skipped = o.status === 'SKIPPED';
+    const sheet = openSheet(`
+        <h2>${esc(o.name)}</h2>
+        <p class="small muted sheet-sub">${statusLabel(o)} · ${esc(o.accountName)}${o.paymentMethodName ? ' · ' + esc(o.paymentMethodName) : ''}</p>
+        ${paid ? `<div class="notice">${ico('check')} Pago em ${isoToBr(o.paidDate)} — ${money(o.amount)}</div>
+            <p class="small muted">Para desfazer, exclua o lançamento em Lançamentos: o pagamento volta a ficar pulado e pode ser reaberto.</p>`
+        : `<form id="occ-form" novalidate>
+            <input class="amount-input" id="o-amount" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(o.amount)}" aria-label="Valor">
+            ${o.variableAmount ? '<p class="small muted center">Valor variável: informe quanto veio neste mês.</p>' : ''}
+            ${dateField('o-date', todayIso(), o.type === 'INCOME' ? 'Data do recebimento' : 'Data do pagamento')}
+            <p class="small muted">Pode ser antes do vencimento — por exemplo, pagar no dia 28 o que vence no dia 30.</p>
+            <div class="grid2">
+                <div class="field"><label for="o-account">Conta</label><select id="o-account">${accountOptions(o.accountId)}</select></div>
+                <div class="field"><label for="o-method">Forma de pagamento</label><select id="o-method">${options(state.methods, o.paymentMethodId, {none: '—'})}</select></div>
+            </div>
+            <div class="form-actions">
+                ${skipped ? '<button type="button" class="btn" id="o-reopen">Reabrir</button>' : '<button type="button" class="btn" id="o-skip">Pular este mês</button>'}
+                <button type="submit" class="btn primary">${o.type === 'INCOME' ? 'Receber' : 'Pagar'}</button>
+            </div></form>`}`);
+    if (paid) return;
+    const dateValue = bindDate(sheet, 'o-date');
+    const skip = $('#o-skip', sheet), reopen = $('#o-reopen', sheet);
+    if (skip) skip.onclick = () => run(() => api(`/recurring/occurrences/${o.id}/skip`, {method: 'POST'}), 'Pagamento pulado');
+    if (reopen) reopen.onclick = () => run(() => api(`/recurring/occurrences/${o.id}/reopen`, {method: 'POST'}), 'Pagamento reaberto');
+    $('#occ-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const typed = $('#o-amount', sheet).value.trim();
+        const amount = typed ? parseAmount(typed) : null;
+        if (typed && !(amount > 0)) return toast('Informe um valor maior que zero.');
+        if (!typed && o.amount == null) return toast('Informe o valor deste pagamento.');
+        if (!dateValue()) return toast('Informe uma data válida.');
+        run(() => api(`/recurring/occurrences/${o.id}/pay`, {method: 'POST', body: {
+            date: dateValue(), amount,
+            accountId: Number($('#o-account', sheet).value),
+            paymentMethodId: nextId($('#o-method', sheet).value)
+        }}), o.type === 'INCOME' ? 'Recebimento registrado' : 'Pagamento registrado');
+    };
+}
+
+/* ---------- More: menu and sub pages ---------- */
+function renderMore() {
+    const pages = {accounts: renderAccountsPage, methods: renderMethodsPage, recurring: renderRecurringPage,
+        categories: renderCategoriesPage, trash: renderTrashPage, backup: renderBackupPage, import: renderImportPage, templates: renderTemplatesPage, profiles: renderProfilesPage};
+    const page = pages[state.sub];
+    if (page) page(); else renderMoreMenu();
+}
+
+const CURRENCY_NAMES = {BRL: 'Real brasileiro (R$)', USD: 'Dólar americano (US$)', EUR: 'Euro (€)', GBP: 'Libra esterlina (£)',
+    ARS: 'Peso argentino (AR$)', CLP: 'Peso chileno (CLP)', MXN: 'Peso mexicano (MX$)', JPY: 'Iene japonês (¥)'};
+
+/* ---------- Security (S1–S3) ----------
+   The password is optional and off by default. The card says whether the app can be reached from other devices. */
+function securityCard() {
+    const s = state.security || {};
+    const warning = s.localOnly === false && !s.passwordSet
+        ? `<div class="notice">${ico('shield')} O app aceita conexões da rede (celular). Defina uma senha.</div>` : '';
+    const buttons = s.passwordSet
+        ? `<button class="chip" id="pw-change">Alterar senha</button><button class="chip" id="pw-remove">Remover senha</button><button class="chip" id="pw-logout">Sair</button>`
+        : `<button class="chip active" id="pw-set">Definir senha</button>`;
+    return `<h2 class="section-title">Segurança</h2>
+        <div class="card stack-tight">
+            ${warning}
+            <p><strong>${s.passwordSet ? 'Com senha' : 'Sem senha'}</strong></p>
+            <p class="small muted">${window.localApp
+                ? (s.passwordSet ? 'O app pede a senha ao abrir e depois de ficar um tempo em segundo plano. Vale para todos os perfis.'
+                    : 'Por padrão o app abre direto. Defina uma senha para pedi-la ao abrir.')
+                : (s.passwordSet
+                    ? 'O app pede a senha ao abrir, no computador e no celular.'
+                    : 'Por padrão o app abre direto. Defina uma senha para pedi-la ao abrir, no computador e no celular.')}</p>
+            <div class="chips">${buttons}</div>
+            <p class="small muted">${window.localApp
+                ? 'A senha trava a abertura do app; ela não criptografa os dados guardados no aparelho. Se esquecer, use “Esqueci a senha” na tela de entrada: isso apaga todos os dados do aparelho, então mantenha um backup fora do app.'
+                : `${s.localOnly === false ? 'Acesso pela rede local: ligado (run.bat celular).' : 'Acesso só neste computador. Para o celular, use run.bat celular.'}
+                Se esquecer a senha, apague o arquivo security.properties dentro da pasta de dados: o app volta a abrir sem senha.`}</p>
+        </div>`;
+}
+
+/** Sets, changes or removes the password. Changing or removing it needs the current one. */
+function openPasswordSheet(mode) {
+    const title = {set: 'Definir senha', change: 'Alterar senha', remove: 'Remover senha'}[mode];
+    const sheet = openSheet(`<h2>${title}</h2>
+        <form id="pwd-form" novalidate>
+            ${mode === 'set' ? '' : '<div class="field"><label for="pwd-current">Senha atual</label><input id="pwd-current" type="password" autocomplete="current-password"></div>'}
+            ${mode === 'remove' ? '<p class="small muted">Sem senha, o app volta a abrir direto, como antes.</p>' : `
+            <div class="field"><label for="pwd-new">Nova senha</label><input id="pwd-new" type="password" autocomplete="new-password" maxlength="72" placeholder="Pelo menos 4 caracteres"></div>
+            <div class="field"><label for="pwd-repeat">Repita a nova senha</label><input id="pwd-repeat" type="password" autocomplete="new-password" maxlength="72"></div>`}
+            <div class="form-actions"><button type="submit" class="btn ${mode === 'remove' ? 'danger' : 'primary'}">${mode === 'remove' ? 'Remover' : 'Salvar'}</button></div>
+        </form>`);
+    $('#pwd-form', sheet).onsubmit = async e => {
+        e.preventDefault();
+        const current = mode === 'set' ? null : $('#pwd-current', sheet).value;
+        let password = '';
+        if (mode !== 'remove') {
+            password = $('#pwd-new', sheet).value;
+            if (password.length < 4) return toast('A senha deve ter pelo menos 4 caracteres.');
+            if (password !== $('#pwd-repeat', sheet).value) return toast('As senhas não são iguais.');
+        }
+        try {
+            state.security = await api('/api/auth/password', {method: 'PUT', body: {current, password}});
+            closeSheet();
+            toast(mode === 'remove' ? 'Senha removida' : 'Senha salva');
+            render();
+        } catch (err) {
+            toast(err.message);
+        }
+    };
+    const first = $('#pwd-current, #pwd-new', sheet);
+    if (first) first.focus();
+}
+
+/** The "Sobre" card: the version, where the data is kept, and on the computer itself a button to open that folder (U14). */
+async function loadAbout() {
+    const box = $('#about-box');
+    if (!box) return;
+    try {
+        const info = await api('/api/about');
+        $('#about-version', box).textContent = `versão ${info.version}`;
+        $('#about-folder', box).innerHTML = `<span>Dados guardados em</span> <code>${esc(info.dataFolder)}</code>`;
+        const open = $('#open-data', box);
+        open.hidden = window.localApp || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+        open.onclick = async () => {
+            try {
+                await api('/api/about/open-data-folder', {method: 'POST'});
+            } catch (e) { toast(e.message); }
+        };
+        if (info.startupAvailable) {
+            box.insertAdjacentHTML('beforeend', `<label class="switch-row"><input type="checkbox" id="startup" ${info.startupEnabled ? 'checked' : ''}>
+                <span><strong>Iniciar com o Windows</strong>
+                <span class="small muted" style="display:block">Abre o Expense Tracker junto com o computador, direto na bandeja. Vale só para este usuário.</span></span></label>`);
+            $('#startup', box).onchange = async e => {
+                try {
+                    await api('/api/about/startup', {method: 'PUT', body: {enabled: e.target.checked}});
+                    toast(e.target.checked ? 'O app vai abrir com o Windows' : 'O app não abre mais com o Windows');
+                } catch (err) {
+                    e.target.checked = !e.target.checked;
+                    toast(err.message);
+                }
+            };
+        }
+    } catch (e) {
+        $('#about-folder', box).textContent = '';
+    }
+}
+
+function renderMoreMenu() {
+    const activeRules = state.occurrences.length;
+    $('#view').innerHTML = `<div class="stack">
+        <h2 class="section-title">Cadastros</h2>
+        <div class="list">
+            ${menuRow('profiles', 'user', 'Perfis', state.profiles.profiles.length > 1 ? `Em uso: ${currentProfile().name} · ${state.profiles.profiles.length} perfis` : 'Separe os dados de pessoas diferentes')}
+            ${menuRow('accounts', 'bank', 'Contas', `${activeAccounts().length} ativas`)}
+            ${menuRow('methods', 'credit-card', 'Formas de pagamento', state.methods.map(m => m.name).slice(0, 4).join(', '))}
+            ${menuRow('recurring', 'repeat', 'Pagamentos recorrentes', activeRules ? `${activeRules} neste mês` : 'Aluguel, assinaturas, salário…')}
+            ${menuRow('categories', 'tag', 'Categorias', `${state.categories.length} categorias`)}
+            ${menuRow('templates', 'star', 'Modelos favoritos', state.templates.length ? `${state.templates.length} modelos` : 'Lançamentos que você repete')}
+            ${menuRow('trash', 'trash', 'Lixeira', 'Lançamentos e transferências excluídos')}
+        </div>
+        <h2 class="section-title">Configurações</h2>
+        <div class="card stack-tight">
+            <label class="switch-row"><input type="checkbox" id="auto-pay" ${state.settings.autoPayRecurring ? 'checked' : ''}>
+                <span><strong>Descontar pagamentos recorrentes automaticamente</strong>
+                <span class="small muted" style="display:block">Ligado: no dia do vencimento o lançamento é criado sozinho. Desligado: eles ficam em “A pagar” até você confirmar. Pagamentos de valor variável sempre pedem confirmação.</span></span></label>
+            <label class="switch-row"><input type="checkbox" id="rollover" ${state.settings.budgetRollover ? 'checked' : ''}>
+                <span><strong>Levar a sobra do orçamento para o mês seguinte</strong>
+                <span class="small muted" style="display:block">O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}</span></span></label>
+            <div class="field" style="margin:0"><label for="currency">Moeda</label>
+                <select id="currency">${Object.entries(CURRENCY_NAMES).map(([code, name]) =>
+                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
+                <span class="small muted">Só muda o símbolo e o formato: os valores não são convertidos.</span></div>
+            <div class="field" style="margin:0"><label for="language">Idioma</label>
+                <select id="language">${[['pt', 'Português'], ['en', 'English'], ['es', 'Español']].map(([code, name]) =>
+                    `<option value="${code}" ${LANG === code ? 'selected' : ''}>${name}</option>`).join('')}</select>
+                <span class="small muted">Vale para o app inteiro, em todos os aparelhos. Os nomes que você criou (categorias, contas…) não são traduzidos.</span></div>
+            <label class="switch-row"><input type="checkbox" id="reminders" ${state.settings.remindersEnabled ? 'checked' : ''}>
+                <span><strong>Lembretes</strong>
+                <span class="small muted" style="display:block">${window.nativeNotifications
+                    ? 'Avisa (no sino do topo e em notificações do celular) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. As contas e o fim do mês também avisam às 9h, mesmo com o app fechado.'
+                    : `Avisa (no sino do topo${window.desktop ? ' e em notificações do Windows' : ' e, se você permitir, em notificações do navegador'}) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. Só funciona com o app aberto.`}</span></span></label>
+            <div class="field" style="margin:0"><label for="reminder-days">Avisar contas com antecedência de</label>
+                <select id="reminder-days" ${state.settings.remindersEnabled ? '' : 'disabled'}>${[1, 2, 3, 5, 7, 10, 15].map(n =>
+                    `<option value="${n}" ${state.settings.reminderDays === n ? 'selected' : ''}>${n === 1 ? '1 dia' : n + ' dias'}</option>`).join('')}</select></div>
+            <label class="switch-row"><input type="checkbox" id="auto-backup" ${state.settings.autoBackup ? 'checked' : ''}>
+                <span><strong>Backup automático todo dia</strong>
+                <span class="small muted" style="display:block">Guarda uma cópia de tudo na pasta de dados, no máximo uma por dia, enquanto o app estiver aberto. Ficam as 7 mais recentes, em Backup e restauração.</span></span></label>
+            ${state.settings.autoBackup ? '' : '<p class="small" style="color:var(--warn);margin:0">Sem backup automático, um erro ou um arquivo apagado por engano pode levar seus dados sem volta. Você pode deixar desligado e ignorar este aviso.</p>'}
+        </div>
+        ${securityCard()}
+        <h2 class="section-title">Aparência</h2>
+        <div class="card"><div class="chips">
+            ${[['light', 'sun', 'Claro'], ['dark', 'moon', 'Escuro']].map(([v, i, l]) =>
+                `<button class="chip ${currentTheme() === v ? 'active' : ''}" data-theme="${v}">${ico(i)} ${l}</button>`).join('')}
+        </div></div>
+        <h2 class="section-title">Dados</h2>
+        <div class="list">
+            <button class="row" id="report-more"><span class="avatar" style="background:var(--surface-2)">${ico('file')}</span><span class="grow"><span class="title">Relatório em PDF ou Excel</span><span class="small muted">Extrato de um mês ou de qualquer período</span></span></button>
+            ${menuRow('import', 'upload', 'Importar extrato ou planilha', 'OFX do banco, CSV de banco/cartão ou o CSV exportado daqui')}
+            ${menuRow('backup', 'shield', 'Backup e restauração', 'Salvar uma cópia de tudo ou voltar a uma cópia')}
+            <a class="row" id="export-csv" href="/api/export.csv" download style="text-decoration:none;color:inherit"><span class="avatar" style="background:var(--surface-2)">${ico('download')}</span><span class="grow title">Exportar para planilha (CSV)</span></a>
+            <button class="row" id="demo"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Carregar dados de exemplo</span></button>
+            <button class="row" id="wipe"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Mover todos os lançamentos para a lixeira</span></button>
+        </div>
+        <h2 class="section-title">Sobre</h2>
+        <div class="card about" id="about-box">
+            <p><strong>Expense Tracker</strong> <span class="small muted" id="about-version"></span></p>
+            <p class="small muted" id="about-folder"></p>
+            ${window.localApp ? '' : `<p class="small muted about-keys"><span><kbd>Ctrl</kbd>+<kbd>N</kbd> novo lançamento</span> · <span><kbd>/</kbd> buscar</span> · <span><kbd>←</kbd><kbd>→</kbd> mudar o mês</span></p>`}
+            <button class="btn block" id="open-data" hidden>${ico('folder')} Abrir pasta de dados</button>
+        </div>
+        ${window.localApp ? '' : '<p class="small muted" style="text-align:center">No celular, abra este endereço no navegador e use “Adicionar à tela inicial”.</p>'}
+    </div>`;
+    $$('[data-sub]').forEach(b => b.onclick = () => { state.sub = b.dataset.sub; render(); window.scrollTo({top: 0}); });
+    const saveSetting = async (body, message, input) => {
+        try {
+            state.settings = await api('/api/settings', {method: 'PUT', body});
+            toast(message);
+            await loadAll();
+        } catch (err) {
+            if (input && input.type === 'checkbox') input.checked = !input.checked;
+            toast(err.message);
+        }
+    };
+    $('#auto-pay').onchange = e => saveSetting({autoPayRecurring: e.target.checked},
+        e.target.checked ? 'Recorrentes serão descontados automaticamente' : 'Recorrentes dependem da sua confirmação', e.target);
+    $('#rollover').onchange = e => saveSetting({budgetRollover: e.target.checked},
+        e.target.checked ? 'A sobra do orçamento passa para o mês seguinte' : 'Cada mês tem só o seu limite', e.target);
+    $('#auto-backup').onchange = e => saveSetting({autoBackup: e.target.checked},
+        e.target.checked ? 'Backup automático ligado' : 'Backup automático desligado', e.target);
+    $('#currency').onchange = e => saveSetting({currency: e.target.value}, 'Moeda alterada (os valores não foram convertidos)');
+    $('#language').onchange = async e => {
+        try {
+            await api('/app/language', {method: 'PUT', body: {language: e.target.value}});
+            safeStorage.set('lang', e.target.value);
+            location.reload();
+        } catch (err) {
+            toast(err.message);
+        }
+    };
+    $('#reminders').onchange = e => saveSetting({remindersEnabled: e.target.checked}, e.target.checked ? 'Lembretes ligados' : 'Lembretes desligados', e.target);
+    $('#reminder-days').onchange = e => saveSetting({reminderDays: Number(e.target.value)}, 'Antecedência atualizada');
+    $$('.chip[data-theme]').forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); render(); });
+    $('#report-more').onclick = openReportSheet;
+    const setup = $('#pw-set'), change = $('#pw-change'), remove = $('#pw-remove'), logout = $('#pw-logout');
+    if (setup) setup.onclick = () => openPasswordSheet('set');
+    if (change) change.onclick = () => openPasswordSheet('change');
+    if (remove) remove.onclick = () => openPasswordSheet('remove');
+    if (logout) logout.onclick = async () => {
+        try { await api('/api/auth/logout', {method: 'POST'}); location.reload(); } catch (e) { toast(e.message); }
+    };
+    loadAbout();
+    $('#export-csv').onclick = async e => {
+        if (!window.desktop && !window.nativeFiles) return; // browsers handle the download attribute themselves
+        e.preventDefault();
+        try {
+            const res = await busy(() => fetch('/api/export.csv'), 'Preparando o arquivo…');
+            if (!res.ok) throw new Error(`Erro ${res.status}`);
+            saveTextFile('lancamentos.csv', await res.text());
+        } catch (err) {
+            toast(`Não foi possível exportar: ${err.message}`);
+        }
+    };
+    $('#demo').onclick = async () => {
+        if (!await confirmDialog('Adicionar lançamentos de exemplo dos últimos 3 meses?', {okLabel: 'Adicionar', danger: false})) return;
+        await run(() => api('/api/demo-data', {method: 'POST'}), 'Dados de exemplo carregados');
+    };
+    $('#wipe').onclick = async () => {
+        if (!await confirmDialog('Mover TODOS os lançamentos e transferências para a lixeira? Contas, categorias e orçamentos são mantidos, e dá para restaurar em Mais → Lixeira por 30 dias.', {okLabel: 'Mover tudo'})) return;
+        await run(() => api('/api/data', {method: 'DELETE'}), 'Tudo foi para a lixeira');
+    };
+}
+
+function renderCategoriesPage() {
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Categorias')}
+        <p class="small muted">Uma categoria pode ter subcategorias (por exemplo, Alimentação › Restaurante). Os totais e o orçamento da categoria principal somam as subcategorias.</p>
+        <div class="list">${orderedCategories().map(c => `<button class="row ${c.parentId ? 'sub-row' : ''}" data-cat="${c.id}">
+            ${avatar(c.icon, c.color)}<span class="grow title">${esc(c.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
+            <button class="row" id="new-cat"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova categoria</span></button></div></div>`;
+    bindBack();
+    $$('[data-cat]').forEach(b => b.onclick = () => openCategorySheet(state.categories.find(c => c.id === Number(b.dataset.cat))));
+    $('#new-cat').onclick = () => openCategorySheet(null);
+}
+
+/* ---------- Accounts ---------- */
+function renderAccountsPage() {
+    const active = activeAccounts();
+    const archived = state.accounts.filter(a => a.archived);
+    const available = active.filter(a => !a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const saved = active.filter(a => a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const cardInfo = a => a.type === 'CREDIT_CARD' ? (a.closingDay && a.dueDay ? ` · fecha dia ${a.closingDay}, vence dia ${a.dueDay} · ver faturas` : ' · defina o fechamento') : '';
+    const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}">${avatar(a.icon || 'bank', a.color)}
+        <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${esc(ACCOUNT_TYPES[a.type])}${cardInfo(a)}${a.parentName ? ' · dentro de ' + esc(a.parentName) : ''}${a.archived ? ' · arquivada' : ''}</span></span>
+        <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance)}</span></button>`;
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Contas')}
+        <div class="card">
+            <div class="small muted">Disponível nas contas</div><div style="font-size:1.5rem;font-weight:800">${money(available)}</div>
+            ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
+            <p class="small muted" style="margin-top:6px">Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só o que está pago conta.</p></div>
+        <div class="list">${orderedAccounts(active).map(row).join('')}
+            <button class="row" id="new-account"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button></div>
+        ${archived.length ? `<h2 class="section-title">Arquivadas</h2><div class="list">${orderedAccounts(archived).map(row).join('')}</div>` : ''}</div>`;
+    bindBack();
+    $$('[data-account]').forEach(b => b.onclick = () => {
+        const account = accountById(Number(b.dataset.account));
+        if (account.type === 'CREDIT_CARD' && account.closingDay && account.dueDay && !account.archived) openInvoices(account);
+        else openAccountSheet(account);
+    });
+    $('#new-account').onclick = () => openAccountSheet(null);
+}
+
+function openAccountSheet(account) {
+    const hasParts = !!account && state.accounts.some(a => a.parentId === account.id);
+    const tops = state.accounts.filter(a => !a.parentId && !a.archived && (!account || a.id !== account.id));
+    const sheet = openSheet(`
+        <h2>${account ? 'Editar conta' : 'Nova conta'}</h2>
+        <form id="acc-form" novalidate>
+            <div class="field"><label for="a-name">Nome</label><input id="a-name" maxlength="80" placeholder="Ex.: Santander" value="${esc(account?.name)}"></div>
+            <div class="grid2">
+                <div class="field"><label for="a-type">Tipo</label><select id="a-type">${Object.entries(ACCOUNT_TYPES).map(([k, v]) =>
+                    `<option value="${k}" ${(account?.type || 'CHECKING') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+                <div class="field"><label>Cor</label><div class="swatches" id="a-colors"></div></div>
+            </div>
+            <div class="grid2" id="a-card" hidden>
+                <div class="field"><label for="a-closing">Dia de fechamento</label><input id="a-closing" inputmode="numeric" maxlength="2" placeholder="Ex.: 10" value="${esc(account?.closingDay ?? '')}"></div>
+                <div class="field"><label for="a-due">Dia de vencimento</label><input id="a-due" inputmode="numeric" maxlength="2" placeholder="Ex.: 20" value="${esc(account?.dueDay ?? '')}"></div>
+            </div>
+            <p class="small muted" id="a-card-hint" hidden style="margin-top:-6px">As compras feitas até o dia de fechamento entram na fatura daquele mês; as de depois, na do mês seguinte. O saldo do cartão fica negativo (é o que você deve) e volta a zero quando você paga a fatura.</p>
+            <div class="field"><label for="a-parent">Fica dentro de</label>
+                <select id="a-parent" ${hasParts ? 'disabled' : ''}>${options(tops, account?.parentId, {none: 'Nenhuma (conta própria)'})}</select>
+                <span class="small muted">${hasParts ? 'Esta conta tem partes dentro dela, então não pode ficar dentro de outra.'
+                    : 'Para investimentos que ficam dentro de um banco (ex.: a caixinha do Nubank). O saldo dela fica separado do saldo disponível da conta; para guardar dinheiro, faça uma transferência.'}</span></div>
+            <div class="field"><label for="a-balance">Saldo inicial (${esc(currencySymbol())})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
+                <span class="small muted">Quanto havia na conta antes de começar a lançar aqui. Pode ser negativo.</span></div>
+            <div class="field"><label>Ícone</label><div class="icon-picker" id="a-icons"></div></div>
+            ${account ? `<label class="switch-row"><input type="checkbox" id="a-archived" ${account.archived ? 'checked' : ''}><span>Arquivada<span class="small muted" style="display:block">Mantém o histórico, mas não aparece ao lançar.</span></span></label>` : ''}
+            <div class="form-actions">
+                ${account ? '<button type="button" class="btn danger" id="a-del">Excluir</button>' : ''}
+                <button type="submit" class="btn primary">Salvar</button>
+            </div>
+        </form>`);
+    const icon = iconPicker(sheet, '#a-icons', ACCOUNT_ICONS, account?.icon || 'bank');
+    const colorOf = colorPicker(sheet, '#a-colors', account?.color || '#64B5F6');
+    const paintCard = () => {
+        const card = $('#a-type', sheet).value === 'CREDIT_CARD';
+        $('#a-card', sheet).hidden = !card;
+        $('#a-card-hint', sheet).hidden = !card;
+    };
+    $('#a-type', sheet).onchange = paintCard;
+    paintCard();
+    if (account) {
+        $('#a-del', sheet).onclick = async () => {
+            if (await confirmDialog(`Excluir a conta “${account.name}”? Contas com lançamentos não podem ser excluídas — arquive-as.`, {okLabel: 'Excluir'}))
+                run(() => api(`/accounts/${account.id}`, {method: 'DELETE'}), 'Conta excluída');
+        };
+    }
+    $('#acc-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const name = $('#a-name', sheet).value.trim();
+        if (!name) return toast('Informe o nome da conta.');
+        const typed = $('#a-balance', sheet).value.trim();
+        const initialBalance = typed ? parseAmount(typed) : 0;
+        if (Number.isNaN(initialBalance)) return toast('Saldo inicial inválido.');
+        const type = $('#a-type', sheet).value;
+        const closingDay = Number($('#a-closing', sheet).value), dueDay = Number($('#a-due', sheet).value);
+        if (type === 'CREDIT_CARD' && !(Number.isInteger(closingDay) && closingDay >= 1 && closingDay <= 31
+                && Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31)) {
+            return toast('Informe o dia de fechamento e o de vencimento (de 1 a 31).');
+        }
+        const body = {name, type, color: colorOf(), icon: icon(), initialBalance,
+            parentId: hasParts ? null : nextId($('#a-parent', sheet).value),
+            archived: account ? $('#a-archived', sheet).checked : false,
+            closingDay: type === 'CREDIT_CARD' ? closingDay : null, dueDay: type === 'CREDIT_CARD' ? dueDay : null};
+        run(() => api(account ? `/accounts/${account.id}` : '/accounts', {method: account ? 'PUT' : 'POST', body}), 'Conta salva');
+    };
+}
+
+/* ---------- Payment methods ---------- */
+function renderMethodsPage() {
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Formas de pagamento')}
+        <p class="small muted">Como o pagamento foi feito (Pix, débito, crédito…). É independente da conta de onde o dinheiro saiu.</p>
+        <div class="list">${state.methods.map(m => `<button class="row" data-method="${m.id}">
+            <span class="avatar" style="background:var(--surface-2)">${ico('credit-card')}</span><span class="grow title">${esc(m.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
+            <button class="row" id="new-method"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova forma de pagamento</span></button></div></div>`;
+    bindBack();
+    $$('[data-method]').forEach(b => b.onclick = () => openMethodSheet(state.methods.find(m => m.id === Number(b.dataset.method))));
+    $('#new-method').onclick = () => openMethodSheet(null);
+}
+
+function openMethodSheet(method) {
+    const sheet = openSheet(`
+        <h2>${method ? 'Editar forma de pagamento' : 'Nova forma de pagamento'}</h2>
+        <form id="m-form" novalidate>
+            <div class="field"><label for="m-name">Nome</label><input id="m-name" maxlength="60" placeholder="Ex.: Pix" value="${esc(method?.name)}"></div>
+            <div class="form-actions">
+                ${method ? '<button type="button" class="btn danger" id="m-del">Excluir</button>' : ''}
+                <button type="submit" class="btn primary">Salvar</button>
+            </div>
+        </form>`);
+    if (method) {
+        $('#m-del', sheet).onclick = async () => {
+            if (await confirmDialog(`Excluir “${method.name}”? Os lançamentos ficam sem forma de pagamento.`, {okLabel: 'Excluir'}))
+                run(() => api(`/payment-methods/${method.id}`, {method: 'DELETE'}), 'Forma de pagamento excluída');
+        };
+    }
+    $('#m-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const name = $('#m-name', sheet).value.trim();
+        if (!name) return toast('Informe o nome.');
+        run(() => api(method ? `/payment-methods/${method.id}` : '/payment-methods', {method: method ? 'PUT' : 'POST', body: {name}}), 'Forma de pagamento salva');
+    };
+}
+
+/* ---------- Recurring payments ---------- */
+async function renderRecurringPage() {
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Pagamentos recorrentes')}<div class="skeleton"></div></div>`;
+    bindBack();
+    let rules;
+    try {
+        rules = await api('/recurring');
+    } catch (e) {
+        return toast(e.message);
+    }
+    if (state.tab !== 'more' || state.sub !== 'recurring') return; // navigated away while loading
+    const month = state.occurrences;
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Pagamentos recorrentes')}
+        <p class="small muted">Contas e receitas que se repetem todo mês. ${state.settings.autoPayRecurring
+            ? 'Hoje elas são <strong>descontadas automaticamente</strong> no vencimento.'
+            : 'Hoje elas ficam <strong>“A pagar”</strong> até você confirmar (mude em Mais → Configurações).'}</p>
+        <h2 class="section-title">${esc(monthLabel(state.month))}</h2>
+        ${month.length ? `<div class="list">${month.map(o => `<button class="row" data-occ="${o.id}">
+            ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
+            <span class="grow"><span class="title">${esc(o.name)}</span><span class="small muted">${statusLabel(o)} · ${esc(o.accountName)}</span></span>
+            <span class="status-tag ${o.status.toLowerCase()}">${o.status === 'PAID' ? 'Pago' : o.status === 'SKIPPED' ? 'Pulado' : 'Pendente'}</span>
+            <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? money(o.amount) : '—'}</span></button>`).join('')}</div>`
+            : '<div class="card empty">Nenhum pagamento recorrente neste mês.</div>'}
+        <h2 class="section-title">Regras</h2>
+        <div class="list">${rules.map(r => `<button class="row ${r.active ? '' : 'is-archived'}" data-rule="${r.id}">
+            ${avatar(r.categoryIcon || 'repeat', r.categoryColor)}
+            <span class="grow"><span class="title">${esc(r.name)}</span>
+                <span class="small muted">Todo dia ${r.dayOfMonth} · ${esc(r.accountName)}${r.paymentMethodName ? ' · ' + esc(r.paymentMethodName) : ''}${r.active ? '' : ' · pausado'}</span></span>
+            <span class="amount ${r.type === 'INCOME' ? 'income' : 'expense'}">${r.variableAmount ? 'variável' : money(r.amount)}</span></button>`).join('')}
+            <button class="row" id="new-rule"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Novo pagamento recorrente</span></button></div></div>`;
+    bindBack();
+    bindDueRows($('#view'));
+    $$('[data-rule]').forEach(b => b.onclick = () => openRecurringSheet(rules.find(r => r.id === Number(b.dataset.rule))));
+    $('#new-rule').onclick = () => openRecurringSheet(null);
+}
+
+function openRecurringSheet(rule) {
+    let type = rule ? rule.type : 'EXPENSE';
+    const current = todayIso().slice(0, 7);
+    const startMonths = [...new Set([...(rule ? [rule.startMonth] : []), ...monthRange(shiftMonth(current, -12), 19)])].sort();
+    const endMonths = [...new Set([...(rule?.endMonth ? [rule.endMonth] : []), ...monthRange(current, 61)])].sort();
+    const defaultAccount = state.accountFilter || mainAccountId();
+    const sheet = openSheet(`
+        <h2>${rule ? 'Editar pagamento recorrente' : 'Novo pagamento recorrente'}</h2>
+        <div class="seg"><button type="button" data-type="EXPENSE" class="exp">Despesa</button><button type="button" data-type="INCOME" class="inc">Receita</button></div>
+        <form id="r-form" novalidate>
+            <div class="field"><label for="r-name">Nome</label><input id="r-name" maxlength="120" placeholder="Ex.: Aluguel" value="${esc(rule?.name)}"></div>
+            <div class="grid2">
+                <div class="field"><label for="r-amount">Valor (${currencySymbol()})</label><input id="r-amount" inputmode="decimal" placeholder="0,00" value="${fmtInput(rule?.amount)}" ${rule?.variableAmount ? 'disabled' : ''}></div>
+                <div class="field"><label for="r-day">Dia do mês</label><input id="r-day" type="number" min="1" max="31" inputmode="numeric" value="${rule?.dayOfMonth ?? ''}" placeholder="1 a 31"></div>
+            </div>
+            <label class="switch-row"><input type="checkbox" id="r-variable" ${rule?.variableAmount ? 'checked' : ''}><span>Valor variável<span class="small muted" style="display:block">O valor muda todo mês (luz, água): você informa ao pagar.</span></span></label>
+            <p class="small muted">Em meses que não têm esse dia (ex.: 30 em fevereiro), vale o último dia do mês.</p>
+            <div class="grid2">
+                <div class="field"><label for="r-account">Conta</label><select id="r-account">${accountOptions(rule?.accountId ?? defaultAccount)}</select></div>
+                <div class="field"><label for="r-method">Forma de pagamento</label><select id="r-method">${options(state.methods, rule?.paymentMethodId, {none: '—'})}</select></div>
+            </div>
+            <div class="field"><label for="r-category">Categoria</label><select id="r-category">${options(state.categories, rule?.categoryId, {none: 'Sem categoria'})}</select></div>
+            <div class="grid2">
+                <div class="field"><label for="r-start">Começa em</label><select id="r-start" ${rule ? 'disabled' : ''}>${monthOptions(startMonths, rule?.startMonth || current)}</select></div>
+                <div class="field"><label for="r-end">Termina em</label><select id="r-end">${monthOptions(endMonths, rule?.endMonth || '', {none: 'Sem data final'})}</select></div>
+            </div>
+            <label class="switch-row"><input type="checkbox" id="r-active" ${rule ? (rule.active ? 'checked' : '') : 'checked'}><span>Ativo<span class="small muted" style="display:block">Pausado, não gera novos pagamentos.</span></span></label>
+            <div class="form-actions">
+                ${rule ? '<button type="button" class="btn danger" id="r-del">Excluir</button>' : ''}
+                <button type="submit" class="btn primary">Salvar</button>
+            </div>
+        </form>`);
+    const paintType = () => {
+        $$('.seg button', sheet).forEach(b => b.classList.toggle('active', b.dataset.type === type));
+    };
+    $$('.seg button', sheet).forEach(b => b.onclick = () => { type = b.dataset.type; paintType(); });
+    paintType();
+    $('#r-variable', sheet).onchange = e => { $('#r-amount', sheet).disabled = e.target.checked; };
+    if (rule) {
+        $('#r-del', sheet).onclick = async () => {
+            if (await confirmDialog(`Excluir “${rule.name}”? Os lançamentos que já foram criados continuam.`, {okLabel: 'Excluir'}))
+                run(() => api(`/recurring/${rule.id}`, {method: 'DELETE'}), 'Pagamento recorrente excluído');
+        };
+    }
+    $('#r-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const name = $('#r-name', sheet).value.trim();
+        const variableAmount = $('#r-variable', sheet).checked;
+        const amount = variableAmount ? null : parseAmount($('#r-amount', sheet).value);
+        const dayOfMonth = Number($('#r-day', sheet).value);
+        if (!name) return toast('Informe o nome do pagamento.');
+        if (!variableAmount && !(amount > 0)) return toast('Informe o valor ou marque como variável.');
+        if (!(dayOfMonth >= 1 && dayOfMonth <= 31)) return toast('Informe o dia do mês (1 a 31).');
+        const body = {
+            name, type, amount, variableAmount, dayOfMonth,
+            accountId: Number($('#r-account', sheet).value),
+            paymentMethodId: nextId($('#r-method', sheet).value),
+            categoryId: nextId($('#r-category', sheet).value),
+            active: $('#r-active', sheet).checked,
+            startMonth: rule ? rule.startMonth : $('#r-start', sheet).value,
+            endMonth: $('#r-end', sheet).value || null
+        };
+        run(() => api(rule ? `/recurring/${rule.id}` : '/recurring', {method: rule ? 'PUT' : 'POST', body}), 'Pagamento recorrente salvo');
+    };
+}
+
+/* ---------- Goals tab: pots and wish list ---------- */
+function renderGoals() {
+    const pots = state.pots, wishes = state.wishes;
+    const tab = state.wishTab;
+    const shown = wishes.filter(w => w.status === tab);
+    const wishedTotal = wishes.filter(w => w.status === 'WISHED').reduce((sum, w) => sum + Number(w.estimatedPrice || 0), 0);
+    const potCard = p => {
+        const balance = Number(p.balance), goal = p.goal == null ? null : Number(p.goal);
+        const pct = goal ? Math.min(100, (balance / goal) * 100) : null;
+        let hint = p.mode === 'FIXED' ? `${money(p.monthlyAmount)} por mês` : 'Aportes manuais';
+        if (goal && balance < goal && p.mode === 'FIXED' && Number(p.monthlyAmount) > 0) {
+            hint += ` · meta em ~${Math.ceil((goal - balance) / Number(p.monthlyAmount))} meses`;
+        } else if (goal && balance >= goal) {
+            hint += ' · meta atingida';
+        }
+        return `<button class="card pot-card ${p.active ? '' : 'is-archived'}" data-pot="${p.id}">
+            <span class="pot-top">${avatar(p.icon || 'coins', p.color)}
+                <span class="grow"><strong>${esc(p.name)}</strong><span class="small muted" style="display:block">${esc(hint)}</span></span>
+                <strong>${money(balance)}</strong></span>
+            ${goal ? `<span class="progress"><i style="width:${pct}%"></i></span><span class="budget-meta"><span>${pct.toFixed(0)}% de ${money(goal)}</span></span>` : ''}</button>`;
+    };
+    const wishRow = w => `<div class="row wish-row" data-wish="${w.id}">
+        <span class="avatar" style="background:var(--surface-2)">${ico('gift')}</span>
+        <span class="grow"><span class="title">${esc(w.name)}</span>
+            <span class="small muted">${w.status === 'BOUGHT'
+                ? `Comprado em ${isoToBr(w.purchaseDate)} por ${money(w.realPrice)}${w.estimatedPrice != null ? ` (estimado ${money(w.estimatedPrice)})` : ''}`
+                : `${w.estimatedPrice != null ? 'Estimado ' + money(w.estimatedPrice) : 'Sem preço estimado'}${w.potName ? ' · ' + esc(w.potName) : ''}`}</span></span>
+        ${w.status === 'WISHED' ? `<button class="chip buy-chip" data-buy="${w.id}">Comprei</button>` : ''}</div>`;
+
+    $('#view').innerHTML = `<div class="stack">
+        <h2 class="section-title">Caixinhas</h2>
+        ${pots.length ? pots.map(potCard).join('') : `<div class="card empty"><div class="big">${ico('coins')}</div>Separe um valor todo mês para um objetivo:<br>viagem, reserva, uma compra grande…</div>`}
+        <button class="btn block" id="new-pot">${ico('plus')} Nova caixinha</button>
+        <h2 class="section-title">Lista de desejos</h2>
+        <div class="chips">${[['WISHED', 'Desejados'], ['BOUGHT', 'Comprados'], ['DISCARDED', 'Descartados']].map(([v, l]) =>
+            `<button class="chip ${tab === v ? 'active' : ''}" data-wtab="${v}">${l}</button>`).join('')}</div>
+        ${tab === 'WISHED' && wishedTotal > 0 ? `<div class="small muted">Total estimado: <strong>${money(wishedTotal)}</strong></div>` : ''}
+        ${shown.length ? `<div class="list">${shown.map(wishRow).join('')}</div>`
+            : `<div class="card empty"><div class="big">${ico('gift')}</div>${tab === 'WISHED' ? 'Nada na lista. Anote o que você quer comprar<br>e o preço estimado.' : 'Nada por aqui.'}</div>`}
+        <button class="btn block" id="new-wish">${ico('plus')} Novo desejo</button>
+    </div>`;
+    $$('[data-pot]').forEach(b => b.onclick = () => openPotDetail(pots.find(p => p.id === Number(b.dataset.pot))));
+    $('#new-pot').onclick = () => openPotSheet(null);
+    $('#new-wish').onclick = () => openWishSheet(null);
+    $$('[data-wtab]').forEach(b => b.onclick = () => { state.wishTab = b.dataset.wtab; renderGoals(); });
+    $$('[data-wish]').forEach(r => r.onclick = e => {
+        if (e.target.closest('[data-buy]')) return;
+        openWishSheet(wishes.find(w => w.id === Number(r.dataset.wish)));
+    });
+    $$('[data-buy]').forEach(b => b.onclick = () => openBuySheet(wishes.find(w => w.id === Number(b.dataset.buy))));
+}
+
+function openPotSheet(pot) {
+    let mode = pot ? pot.mode : 'FIXED';
+    const current = todayIso().slice(0, 7);
+    const sheet = openSheet(`
+        <h2>${pot ? 'Editar caixinha' : 'Nova caixinha'}</h2>
+        <form id="p-form" novalidate>
+            <div class="field"><label for="p-name">Nome</label><input id="p-name" maxlength="80" placeholder="Ex.: Viagem" value="${esc(pot?.name)}"></div>
+            <div class="field"><label>Cor</label><div class="swatches" id="p-colors"></div></div>
+            <div class="field"><label>Como ela cresce?</label>
+                <div class="seg" id="p-mode"><button type="button" data-mode="FIXED">Valor fixo por mês</button><button type="button" data-mode="VARIABLE">Eu aporto quando quiser</button></div></div>
+            <div class="field" id="p-monthly-field"><label for="p-monthly">Aporte mensal (${currencySymbol()})</label><input id="p-monthly" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.monthlyAmount)}">
+                <span class="small muted">Entra sozinho no dia 1 de cada mês, a partir do mês de início. É uma reserva: o dinheiro continua na sua conta.</span></div>
+            <div class="grid2">
+                <div class="field"><label for="p-goal">Meta (opcional)</label><input id="p-goal" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.goal)}"></div>
+                <div class="field"><label for="p-start">Começa em</label><select id="p-start" ${pot ? 'disabled' : ''}>${monthOptions(monthRange(shiftMonth(current, -12), 19), pot?.startMonth || current)}</select></div>
+            </div>
+            <div class="field"><label>Ícone</label><div class="icon-picker" id="p-icons"></div></div>
+            <label class="switch-row"><input type="checkbox" id="p-active" ${pot ? (pot.active ? 'checked' : '') : 'checked'}><span>Ativa<span class="small muted" style="display:block">Pausada, não recebe aportes automáticos.</span></span></label>
+            <div class="form-actions">
+                ${pot ? '<button type="button" class="btn danger" id="p-del">Excluir</button>' : ''}
+                <button type="submit" class="btn primary">Salvar</button>
+            </div>
+        </form>`);
+    const icon = iconPicker(sheet, '#p-icons', POT_ICONS, pot?.icon || 'coins');
+    const colorOf = colorPicker(sheet, '#p-colors', pot?.color || '#81C784');
+    const paintMode = () => {
+        $$('#p-mode button', sheet).forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        $('#p-monthly-field', sheet).hidden = mode !== 'FIXED';
+    };
+    $$('#p-mode button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); });
+    paintMode();
+    if (pot) {
+        $('#p-del', sheet).onclick = async () => {
+            if (await confirmDialog(`Excluir a caixinha “${pot.name}” e todo o histórico dela? Os desejos ligados a ela ficam sem caixinha.`, {okLabel: 'Excluir'}))
+                run(() => api(`/pots/${pot.id}`, {method: 'DELETE'}), 'Caixinha excluída');
+        };
+    }
+    $('#p-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const name = $('#p-name', sheet).value.trim();
+        const monthly = mode === 'FIXED' ? parseAmount($('#p-monthly', sheet).value) : null;
+        const goalText = $('#p-goal', sheet).value.trim();
+        const goal = goalText ? parseAmount(goalText) : null;
+        if (!name) return toast('Informe o nome da caixinha.');
+        if (mode === 'FIXED' && !(monthly > 0)) return toast('Informe o aporte mensal.');
+        if (goalText && !(goal > 0)) return toast('A meta deve ser maior que zero.');
+        const body = {name, color: colorOf(), icon: icon(), goal, mode, monthlyAmount: monthly,
+            startMonth: pot ? pot.startMonth : $('#p-start', sheet).value, active: $('#p-active', sheet).checked};
+        run(() => api(pot ? `/pots/${pot.id}` : '/pots', {method: pot ? 'PUT' : 'POST', body}), 'Caixinha salva');
+    };
+}
+
+async function openPotDetail(pot) {
+    let entries = [];
+    try { entries = await api(`/pots/${pot.id}/entries`); } catch (e) { return toast(e.message); }
+    const kindLabel = {AUTO: 'Aporte mensal', MANUAL: 'Aporte', WITHDRAWAL: 'Retirada', PURCHASE: 'Compra'};
+    const sheet = openSheet(`
+        <h2>${esc(pot.name)}</h2>
+        <div class="pot-balance">${money(pot.balance)}${pot.goal != null ? `<span class="muted"> de ${money(pot.goal)}</span>` : ''}</div>
+        <div class="form-actions" style="margin-bottom:12px">
+            <button type="button" class="btn" id="pd-withdraw">Retirar</button>
+            <button type="button" class="btn primary" id="pd-deposit">Aportar</button>
+        </div>
+        <h3 class="section-title">Histórico</h3>
+        ${entries.length ? `<div class="list">${entries.map(en => `<div class="row">
+            <span class="grow"><span class="title">${kindLabel[en.kind]}${en.note ? ' · ' + esc(en.note) : ''}</span><span class="small muted">${isoToBr(en.date)}</span></span>
+            <span class="amount ${Number(en.amount) < 0 ? 'expense' : 'income'}">${Number(en.amount) < 0 ? '−' : '+'} ${money(Math.abs(Number(en.amount)))}</span>
+            ${en.kind === 'MANUAL' || en.kind === 'WITHDRAWAL' ? `<button class="icon-btn small" data-del-entry="${en.id}" aria-label="Remover">${ico('trash')}</button>` : ''}</div>`).join('')}</div>`
+            : '<div class="card empty">Sem movimentos ainda.</div>'}
+        <div class="form-actions" style="margin-top:12px"><button type="button" class="btn" id="pd-edit">Editar caixinha</button></div>`);
+    $('#pd-deposit', sheet).onclick = () => openMoveSheet(pot, 'deposit');
+    $('#pd-withdraw', sheet).onclick = () => openMoveSheet(pot, 'withdraw');
+    $('#pd-edit', sheet).onclick = () => openPotSheet(pot);
+    $$('[data-del-entry]', sheet).forEach(b => b.onclick = async () => {
+        if (await confirmDialog('Remover este movimento?', {okLabel: 'Remover'}))
+            run(() => api(`/pots/entries/${b.dataset.delEntry}`, {method: 'DELETE'}), 'Movimento removido');
+    });
+}
+
+function openMoveSheet(pot, kind) {
+    const deposit = kind === 'deposit';
+    const sheet = openSheet(`
+        <h2>${deposit ? 'Aportar em' : 'Retirar de'} ${esc(pot.name)}</h2>
+        <form id="mv-form" novalidate>
+            <input class="amount-input" id="mv-amount" inputmode="decimal" placeholder="0,00" autocomplete="off" aria-label="Valor">
+            ${dateField('mv-date', todayIso())}
+            <div class="field"><label for="mv-note">Observação</label><input id="mv-note" maxlength="255" placeholder="Opcional"></div>
+            <div class="form-actions"><button type="submit" class="btn primary">${deposit ? 'Aportar' : 'Retirar'}</button></div>
+        </form>`);
+    const dateValue = bindDate(sheet, 'mv-date');
+    setTimeout(() => $('#mv-amount', sheet).focus(), 60);
+    $('#mv-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const amount = parseAmount($('#mv-amount', sheet).value);
+        if (!(amount > 0)) return toast('Informe um valor maior que zero.');
+        if (!dateValue()) return toast('Informe uma data válida.');
+        run(() => api(`/pots/${pot.id}/${kind}`, {method: 'POST', body: {amount, date: dateValue(), note: $('#mv-note', sheet).value.trim() || null}}),
+            deposit ? 'Aporte registrado' : 'Retirada registrada');
+    };
+}
+
+function openWishSheet(item) {
+    const sheet = openSheet(`
+        <h2>${item ? 'Editar desejo' : 'Novo desejo'}</h2>
+        <form id="w-form" novalidate>
+            <div class="field"><label for="w-name">Produto</label><input id="w-name" maxlength="120" placeholder="Ex.: Fone de ouvido" value="${esc(item?.name)}"></div>
+            <div class="grid2">
+                <div class="field"><label for="w-price">Preço estimado (${currencySymbol()})</label><input id="w-price" inputmode="decimal" placeholder="0,00" value="${fmtInput(item?.estimatedPrice)}"></div>
+                <div class="field"><label for="w-pot">Pagar com a caixinha</label><select id="w-pot">${options(state.pots, item?.potId, {none: 'Nenhuma'})}</select></div>
+            </div>
+            <div class="field"><label for="w-url">Link</label><input id="w-url" maxlength="500" placeholder="Opcional" value="${esc(item?.url)}"></div>
+            <div class="field"><label for="w-notes">Observação</label><textarea id="w-notes" rows="2" maxlength="255">${esc(item?.notes)}</textarea></div>
+            <p class="small muted">Enquanto está na lista, o item não pertence a nenhuma conta. A conta é escolhida quando você marcar “Comprei”.</p>
+            <div class="form-actions">
+                ${item ? '<button type="button" class="btn danger" id="w-del">Excluir</button>' : ''}
+                ${item && item.status === 'WISHED' ? '<button type="button" class="btn" id="w-discard">Descartar</button>' : ''}
+                ${item && item.status === 'DISCARDED' ? '<button type="button" class="btn" id="w-restore">Voltar para a lista</button>' : ''}
+                <button type="submit" class="btn primary">Salvar</button>
+            </div>
+        </form>`);
+    if (item) {
+        $('#w-del', sheet).onclick = async () => {
+            const extra = item.status === 'BOUGHT' ? ' O lançamento da compra continua.' : '';
+            if (await confirmDialog(`Excluir “${item.name}” da lista?${extra}`, {okLabel: 'Excluir'}))
+                run(() => api(`/wishes/${item.id}`, {method: 'DELETE'}), 'Desejo excluído');
+        };
+        const discard = $('#w-discard', sheet), restore = $('#w-restore', sheet);
+        if (discard) discard.onclick = () => run(() => api(`/wishes/${item.id}/discard`, {method: 'POST'}), 'Desejo descartado');
+        if (restore) restore.onclick = () => run(() => api(`/wishes/${item.id}/restore`, {method: 'POST'}), 'Desejo de volta na lista');
+    }
+    $('#w-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const name = $('#w-name', sheet).value.trim();
+        const priceText = $('#w-price', sheet).value.trim();
+        const estimatedPrice = priceText ? parseAmount(priceText) : null;
+        if (!name) return toast('Informe o nome do produto.');
+        if (priceText && !(estimatedPrice > 0)) return toast('O preço estimado deve ser maior que zero.');
+        const body = {name, estimatedPrice, potId: nextId($('#w-pot', sheet).value),
+            url: $('#w-url', sheet).value.trim() || null, notes: $('#w-notes', sheet).value.trim() || null};
+        run(() => api(item ? `/wishes/${item.id}` : '/wishes', {method: item ? 'PUT' : 'POST', body}), 'Desejo salvo');
+    };
+}
+
+function openBuySheet(item) {
+    const pot = item.potId ? state.pots.find(p => p.id === item.potId) : null;
+    const defaultAccount = state.accountFilter || mainAccountId();
+    const sheet = openSheet(`
+        <h2>Comprei: ${esc(item.name)}</h2>
+        <form id="b2-form" novalidate>
+            <input class="amount-input" id="b2-price" inputmode="decimal" placeholder="0,00" autocomplete="off" aria-label="Preço pago" value="${fmtInput(item.estimatedPrice)}">
+            <p class="small muted center">${item.estimatedPrice != null ? `Estimado: ${money(item.estimatedPrice)}. ` : ''}Informe o preço real que você pagou.</p>
+            ${dateField('b2-date', todayIso(), 'Data da compra')}
+            <div class="grid2">
+                <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account">${accountOptions(defaultAccount)}</select></div>
+                <div class="field"><label for="b2-method">Forma de pagamento</label><select id="b2-method">${options(state.methods, null, {none: '—'})}</select></div>
+            </div>
+            <div class="field"><label for="b2-category">Categoria</label><select id="b2-category">${options(state.categories, null, {none: 'Sem categoria'})}</select></div>
+            ${pot ? `<label class="switch-row"><input type="checkbox" id="b2-pot" ${Number(pot.balance) > 0 && (item.estimatedPrice == null || Number(pot.balance) >= Number(item.estimatedPrice)) ? 'checked' : ''}><span>Descontar da caixinha “${esc(pot.name)}”<span class="small muted" style="display:block">Saldo atual: ${money(pot.balance)}</span></span></label>` : ''}
+            <div class="form-actions"><button type="submit" class="btn primary">Registrar compra</button></div>
+        </form>`);
+    const dateValue = bindDate(sheet, 'b2-date');
+    $('#b2-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const price = parseAmount($('#b2-price', sheet).value);
+        if (!(price > 0)) return toast('Informe o preço pago.');
+        if (!dateValue()) return toast('Informe uma data válida.');
+        run(() => api(`/wishes/${item.id}/buy`, {method: 'POST', body: {
+            price, date: dateValue(),
+            accountId: Number($('#b2-account', sheet).value),
+            paymentMethodId: nextId($('#b2-method', sheet).value),
+            categoryId: nextId($('#b2-category', sheet).value),
+            usePot: pot ? $('#b2-pot', sheet).checked : false
+        }}), 'Compra registrada');
+    };
+}
+
+/* ---------- Trash ---------- */
+async function renderTrashPage() {
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}<div class="skeleton"></div></div>`;
+    bindBack();
+    let items;
+    try {
+        items = await api('/trash');
+    } catch (e) {
+        return toast(e.message);
+    }
+    if (state.tab !== 'more' || state.sub !== 'trash') return; // navigated away while loading
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}
+        <p class="small muted">O que você exclui vem para cá e fica guardado por 30 dias; depois é apagado de vez. Restaurar traz o item de volta com a mesma data e conta.</p>
+        ${items.length ? `<div class="list">${items.map(i => `<div class="row" data-trash="${i.kind}:${i.id}">
+            <span class="avatar" style="background:var(--surface-2)">${ico(i.kind === 'TRANSFER' ? 'transfer' : 'receipt')}</span>
+            <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${esc(i.detail)} · ${isoToBr(i.date)} · excluído em ${dateTimeBr(i.deletedAt)}</span></span>
+            <span class="amount">${money(i.amount)}</span>
+            <span class="row-actions"><button class="chip" data-restore="${i.kind}:${i.id}">Restaurar</button>
+            <button class="icon-btn small" data-purge="${i.kind}:${i.id}" aria-label="Excluir de vez">${ico('trash')}</button></span></div>`).join('')}</div>
+            <button class="btn danger block" id="empty-trash">Esvaziar a lixeira</button>`
+            : `<div class="card empty"><div class="big">${ico('trash')}</div>A lixeira está vazia.</div>`}</div>`;
+    bindBack();
+    const refresh = async message => { await loadAll(); toast(message); };
+    $$('[data-restore]').forEach(b => b.onclick = async () => {
+        const [kind, id] = b.dataset.restore.split(':');
+        try { await api(`/trash/${kind}/${id}/restore`, {method: 'POST'}); await refresh('Restaurado'); } catch (e) { toast(e.message); }
+    });
+    $$('[data-purge]').forEach(b => b.onclick = async () => {
+        const [kind, id] = b.dataset.purge.split(':');
+        if (!await confirmDialog('Excluir de vez? Isso não tem volta.', {okLabel: 'Excluir de vez'})) return;
+        try { await api(`/trash/${kind}/${id}`, {method: 'DELETE'}); await refresh('Excluído de vez'); } catch (e) { toast(e.message); }
+    });
+    const empty = $('#empty-trash');
+    if (empty) empty.onclick = async () => {
+        if (!await confirmDialog(`Excluir de vez ${items.length} ${items.length === 1 ? 'item' : 'itens'}? Isso não tem volta.`, {okLabel: 'Esvaziar'})) return;
+        try { await api('/trash', {method: 'DELETE'}); await refresh('Lixeira esvaziada'); } catch (e) { toast(e.message); }
+    };
+}

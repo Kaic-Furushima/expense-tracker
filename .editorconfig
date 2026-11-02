@@ -1,0 +1,19 @@
+# Padronização básica de código (Q4). Linhas em branco e fim de linha ficam como estão nos arquivos existentes.
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+
+[*.{java,js,css,html,xml,properties}]
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.{bat,ps1}]
+end_of_line = crlf

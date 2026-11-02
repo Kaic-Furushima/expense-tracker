@@ -1,0 +1,32 @@
+{
+  "name": "expense-tracker-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Expense Tracker para Android: o mesmo front-end, com a lógica rodando no aparelho (SQLite) e sem precisar de servidor.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-www.mjs",
+    "test": "node --test test/*.test.js",
+    "serve": "npm run build && node scripts/serve-www.mjs",
+    "sync": "npm run build && cap sync android",
+    "android:open": "npm run sync && cap open android",
+    "android:apk": "npm run sync && cd android && gradlew.bat assembleDebug"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/share": "^8.0.3",
+    "fflate": "^0.8.3",
+    "pdf-lib": "^1.17.1",
+    "sql.js": "^1.15.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "esbuild": "^0.28.2"
+  }
+}

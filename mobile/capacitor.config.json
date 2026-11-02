@@ -1,0 +1,8 @@
+{
+  "appId": "com.kaic.expensetracker",
+  "appName": "Expense Tracker",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}
