@@ -14,7 +14,7 @@ import java.time.YearMonth;
 @Table(name = "pots")
 @Getter
 @Setter
-public class Pot {
+public class Pot extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -148,6 +148,10 @@ export class Expenses {
             if (!Number.isInteger(body.installments) || body.installments < 1) errors.installments = 'O número de parcelas deve ser de pelo menos 1.';
             else if (body.installments > MAX_INSTALLMENTS) errors.installments = 'O número de parcelas pode ser de até 60.';
         }
+        if (body.installmentPlan != null) {
+            if (!Array.isArray(body.installmentPlan) || body.installmentPlan.length > MAX_INSTALLMENTS) errors.installmentPlan = 'O número de parcelas pode ser de até 60.';
+            else if (body.installmentPlan.some(s => !s || !isIsoDate(s.date))) errors.installmentPlan = 'Informe a data de cada parcela.';
+        }
         if (Object.keys(errors).length) throw invalid(errors);
         const year = Number(body.date.slice(0, 4));
         if (year < MIN_YEAR || year > MAX_YEAR) throw badRequest(`A data deve estar entre os anos ${MIN_YEAR} e ${MAX_YEAR}.`);
@@ -156,14 +160,15 @@ export class Expenses {
         const status = body.status ?? 'PAID';
         if (!['PAID', 'PENDING'].includes(status)) throw badRequest(`Situação inválida: ${status}`);
 
-        if (body.categoryId != null) this.catalog.category(body.categoryId);
+        this.catalog.requireKind(body.categoryId ?? null, type);
         const account = body.accountId == null ? this.catalog.defaultAccount() : this.catalog.account(body.accountId);
         if (body.paymentMethodId != null) this.catalog.method(body.paymentMethodId);
         return {
             name, description: body.description ?? null, amountCents: toCents(amount), date: body.date, type, status,
             categoryId: body.categoryId ?? null, accountId: account.id, accountType: account.type,
             paymentMethodId: body.paymentMethodId ?? null, tags: body.tags ?? [],
-            installments: body.installments ?? 1
+            installments: body.installments ?? 1,
+            plan: Array.isArray(body.installmentPlan) && body.installmentPlan.length > 1 ? body.installmentPlan : null
         };
     }
 
@@ -188,6 +193,7 @@ export class Expenses {
         return this.db.tx(() => {
             const f = this.validate(body);
             f.tagIds = this.catalog.resolveTags(f.tags);
+            if (f.plan && f.type === 'EXPENSE') return this.get(this.insertPlan(f)[0]);
             if (f.installments > 1 && f.type === 'EXPENSE') return this.get(this.insertInstallments(f)[0]);
             return this.get(this.insert(f));
         });
@@ -215,6 +221,41 @@ export class Expenses {
             }));
         }
         return ids;
+    }
+
+    /**
+     * Compra parcelada num plano proprio: cada parcela tem a sua data, pode ja estar paga ou a pagar e pode ter valor
+     * proprio. Sem nenhum valor informado, o total e dividido como em insertInstallments; com valores, valem os informados
+     * e as parcelas sem valor dividem o que sobra do total (os centavos que nao dividem certo vao para a primeira delas).
+     */
+    insertPlan(f) {
+        const plan = f.plan;
+        const count = plan.length;
+        const amounts = plan.map(s => {
+            if (s.amount == null || s.amount === '') return null;
+            const cents = toCents(s.amount);
+            if (!(cents > 0)) throw badRequest('O valor de cada parcela deve ser maior que zero.');
+            return cents;
+        });
+        const blank = amounts.filter(a => a == null).length;
+        if (blank) {
+            const rest = f.amountCents - amounts.reduce((sum, a) => sum + (a ?? 0), 0);
+            const each = Math.floor(rest / blank);
+            if (each <= 0) throw badRequest('O valor é pequeno demais para tantas parcelas.');
+            const leftover = rest - each * blank;
+            let first = true;
+            amounts.forEach((a, i) => { if (a == null) { amounts[i] = first ? each + leftover : each; first = false; } });
+        }
+        const card = f.accountType === 'CREDIT_CARD';
+        const group = this.db.newId();
+        return plan.map((s, i) => {
+            if (s.status != null && !['PAID', 'PENDING'].includes(s.status)) throw badRequest(`Situação inválida: ${s.status}`);
+            return this.insert(f, {
+                amountCents: amounts[i], date: s.date,
+                status: s.status ?? (i === 0 || card ? f.status : 'PENDING'),
+                group, number: i + 1, total: count
+            });
+        });
     }
 
     update(id, body) {

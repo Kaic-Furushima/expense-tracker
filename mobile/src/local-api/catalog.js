@@ -19,7 +19,7 @@ export class Catalog {
     // ---- categorias ----
 
     categoryResponse(row) {
-        return {id: row.id, name: row.name, icon: row.icon, color: row.color, parentId: row.parent_id};
+        return {id: row.id, name: row.name, icon: row.icon, color: row.color, parentId: row.parent_id, kind: row.kind};
     }
 
     categories() {
@@ -32,19 +32,66 @@ export class Catalog {
         return row;
     }
 
-    createCategory({name, icon, color, parentId}) {
+    /** Uma subcategoria sempre tem o tipo (despesa ou receita) da categoria principal. */
+    createCategory({name, icon, color, parentId, kind}) {
         const clean = this.categoryFields({name, icon, color, parentId}, null);
-        if (this.db.get('select 1 from categories where name = ?', [clean.name])) throw conflict('Já existe uma categoria com esse nome.');
-        const {lastId} = this.db.run('insert into categories (uuid, name, icon, color, parent_id, updated_at) values (?, ?, ?, ?, ?, ?)',
-            [this.db.newId(), clean.name, clean.icon, clean.color, clean.parentId, this.db.now()]);
+        const parent = clean.parentId == null ? null : this.category(clean.parentId);
+        const wanted = parent ? parent.kind : (kind ?? 'EXPENSE');
+        if (!['EXPENSE', 'INCOME'].includes(wanted)) throw badRequest(`Tipo inválido: ${wanted}`);
+        if (this.db.get('select 1 from categories where name = ? and kind = ?', [clean.name, wanted])) throw conflict('Já existe uma categoria com esse nome.');
+        const {lastId} = this.db.run('insert into categories (uuid, name, icon, color, parent_id, kind, updated_at) values (?, ?, ?, ?, ?, ?, ?)',
+            [this.db.newId(), clean.name, clean.icon, clean.color, clean.parentId, wanted, this.db.now()]);
         return this.categoryResponse(this.category(lastId));
+    }
+
+    /** A categoria com esse nome e tipo; cria quando ainda nao existe. */
+    findOrCreateCategory(name, kind = 'EXPENSE', extra = {}) {
+        const found = this.db.get('select id from categories where name = ? and kind = ?', [String(name).trim(), kind]);
+        return found ?? this.createCategory({name, kind, ...extra});
+    }
+
+    /**
+     * Copia a categoria (com as subcategorias) para o outro tipo: o nome usado em despesas tambem passa a existir em receitas
+     * e vice-versa. Nome que ja existe no tipo de destino e mantido como esta. Devolve a copia.
+     */
+    copyCategoryToOtherKind(id) {
+        return this.db.tx(() => {
+            const source = this.category(id);
+            const target = source.kind === 'EXPENSE' ? 'INCOME' : 'EXPENSE';
+            const top = source.parent_id == null ? source : this.category(source.parent_id);
+            const copyOne = (from, parentId) => {
+                const found = this.db.get('select * from categories where name = ? and kind = ?', [from.name, target]);
+                if (found) return found;
+                return this.category(this.createCategory({name: from.name, icon: from.icon, color: from.color, parentId, kind: target}).id);
+            };
+            const topCopy = copyOne(top, null);
+            for (const child of this.db.all('select * from categories where parent_id = ?', [top.id])) {
+                if (source.parent_id == null || child.id === source.id) copyOne(child, topCopy.id);
+            }
+            const result = source.parent_id == null ? topCopy : this.db.get('select * from categories where name = ? and kind = ?', [source.name, target]);
+            return this.categoryResponse(result);
+        });
+    }
+
+    /** Despesa leva categoria de despesa e receita leva categoria de receita. */
+    requireKind(categoryId, type) {
+        if (categoryId == null) return;
+        const category = this.category(categoryId);
+        if (category.kind !== type) {
+            throw badRequest(type === 'INCOME'
+                ? 'Esta categoria é de despesa; escolha uma categoria de receita.'
+                : 'Esta categoria é de receita; escolha uma categoria de despesa.');
+        }
     }
 
     updateCategory(id, body) {
         const current = this.category(id);
         const clean = this.categoryFields(body, current);
         const renamed = current.name.toLowerCase() !== clean.name.toLowerCase();
-        if (renamed && this.db.get('select 1 from categories where name = ?', [clean.name])) throw conflict('Já existe uma categoria com esse nome.');
+        if (renamed && this.db.get('select 1 from categories where name = ? and kind = ?', [clean.name, current.kind])) throw conflict('Já existe uma categoria com esse nome.');
+        if (clean.parentId != null && this.category(clean.parentId).kind !== current.kind) {
+            throw badRequest('A subcategoria precisa ser do mesmo tipo da categoria principal.');
+        }
         this.db.run('update categories set name = ?, icon = ?, color = ?, parent_id = ?, updated_at = ? where id = ?',
             [clean.name, clean.icon, clean.color, clean.parentId, this.db.now(), id]);
         return this.categoryResponse(this.category(id));

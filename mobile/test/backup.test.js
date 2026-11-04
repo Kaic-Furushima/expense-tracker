@@ -55,7 +55,7 @@ describe('backup no formato do app (JSON)', () => {
         spend('Depois do backup', 9, '2026-05-01');
         api.services.backup.restore(file);
         assert.equal(ok('GET', '/expenses').length, 0);
-        assert.equal(ok('GET', '/categories').length, 11);
+        assert.equal(ok('GET', '/categories').length, 12);
     });
 
     it('arquivo invalido e recusado sem mexer nos dados', () => {

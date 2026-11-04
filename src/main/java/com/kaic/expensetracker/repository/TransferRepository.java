@@ -37,11 +37,11 @@ public interface TransferRepository extends JpaRepository<Transfer, Long> {
     Optional<Transfer> findTrashedById(Long id);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update transfers set deleted_at = null where id = :id and deleted_at is not null", nativeQuery = true)
+    @Query(value = "update transfers set deleted_at = null, updated_at = current_timestamp where id = :id and deleted_at is not null", nativeQuery = true)
     void restore(Long id);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update transfers set deleted_at = :at where deleted_at is null", nativeQuery = true)
+    @Query(value = "update transfers set deleted_at = :at, updated_at = current_timestamp where deleted_at is null", nativeQuery = true)
     void trashAll(LocalDateTime at);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)

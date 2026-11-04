@@ -32,7 +32,9 @@ export function seed(db, language = 'pt') {
 export function seedCategories(db, language = 'pt') {
     if (db.value('select count(*) from categories') > 0) return;
     const names = CATEGORY_NAMES[language] ?? CATEGORY_NAMES.pt;
-    CATEGORY_STYLE.forEach(([icon, color], i) => {
-        db.run('insert into categories (uuid, name, icon, color, updated_at) values (?, ?, ?, ?, ?)', [db.newId(), names[i], icon, color, db.now()]);
-    });
+    // Investimentos (8) e Salario (9) sao de receita; "Outros" (10) existe nos dois tipos
+    const add = (i, kind) => db.run('insert into categories (uuid, name, icon, color, kind, updated_at) values (?, ?, ?, ?, ?, ?)',
+        [db.newId(), names[i], CATEGORY_STYLE[i][0], CATEGORY_STYLE[i][1], kind, db.now()]);
+    CATEGORY_STYLE.forEach((_, i) => { if (i !== 8 && i !== 9) add(i, 'EXPENSE'); });
+    for (const i of [8, 9, 10]) add(i, 'INCOME');
 }

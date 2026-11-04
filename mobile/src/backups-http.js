@@ -105,5 +105,5 @@ export function createBackupHttp({backup, store, clock = () => new Date()}) {
         return true;
     }
 
-    return {handle, create, automaticIfDue};
+    return {handle, create, automaticIfDue, restoreContent, read};
 }

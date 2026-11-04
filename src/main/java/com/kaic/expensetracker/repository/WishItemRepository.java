@@ -17,17 +17,17 @@ public interface WishItemRepository extends JpaRepository<WishItem, Long> {
     Optional<WishItem> findByExpenseId(Long expenseId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update WishItem w set w.pot = null where w.pot = :pot")
+    @Query("update WishItem w set w.pot = null, w.updatedAt = current_timestamp where w.pot = :pot")
     void detachPot(Pot pot);
 
     /** Deleting the purchase transaction puts the item back on the wish list. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update WishItem w set w.status = :status, w.expense = null, w.realPrice = null, w.purchaseDate = null "
+    @Query("update WishItem w set w.status = :status, w.expense = null, w.realPrice = null, w.purchaseDate = null, w.updatedAt = current_timestamp "
             + "where w.expense.id = :expenseId")
     void revertPurchase(Long expenseId, WishStatus status);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update WishItem w set w.status = :status, w.expense = null, w.realPrice = null, w.purchaseDate = null "
+    @Query("update WishItem w set w.status = :status, w.expense = null, w.realPrice = null, w.purchaseDate = null, w.updatedAt = current_timestamp "
             + "where w.expense is not null")
     void revertAllPurchases(WishStatus status);
 }

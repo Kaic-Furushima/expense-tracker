@@ -87,6 +87,7 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     // categorias
     r.get('/categories', () => catalog.categories());
     r.post('/categories', ({body}) => created(catalog.createCategory(body ?? {})));
+    r.post('/categories/:id/copy', ({params}) => created(catalog.copyCategoryToOtherKind(Number(params.id))));
     r.put('/categories/:id', ({params, body}) => catalog.updateCategory(Number(params.id), body ?? {}));
     r.delete('/categories/:id', ({params}) => catalog.deleteCategory(Number(params.id)));
 
@@ -243,5 +244,5 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
 const thisMonth = db => isoDate(db.clock()).slice(0, 7);
 
 function profiles(settings) {
-    return {profiles: [{id: 'main', name: 'Principal'}], current: 'main', language: settings.language(), canCreate: false};
+    return {profiles: [{id: 'main', name: 'Principal'}], current: 'main', language: settings.language()};
 }

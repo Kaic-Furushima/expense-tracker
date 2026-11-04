@@ -11,7 +11,7 @@ import java.util.Objects;
 @Table(name = "tags")
 @Getter
 @Setter
-public class Tag {
+public class Tag extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

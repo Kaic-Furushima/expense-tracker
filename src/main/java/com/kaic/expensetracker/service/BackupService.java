@@ -70,10 +70,9 @@ public class BackupService {
     /**
      * Copies the database at most once a day, while the "automatic backup" setting is on (it is off by default).
      * Called for each profile by {@link BackgroundSync}, so the first copy of the day is made soon after the app opens.
-     * Does nothing with MySQL, where the built-in script is not available.
      */
     public synchronized void automaticIfDue() {
-        if (!settings.autoBackup() || !isH2()) {
+        if (!settings.autoBackup()) {
             return;
         }
         Instant last = list().stream().filter(BackupService::isAutomatic)
@@ -125,7 +124,6 @@ public class BackupService {
     }
 
     private void restoreScript(String script) {
-        requireH2();
         String clean = sanitize(script);
         BackupInfo safety = write("backup-" + LocalDateTime.now().format(STAMP) + "-antes-de-restaurar.sql");
         Path temp = folder().resolve("restore.tmp");
@@ -178,7 +176,6 @@ public class BackupService {
     }
 
     private BackupInfo write(String name) {
-        requireH2();
         try {
             Files.createDirectories(folder());
             Path file = folder().resolve(name);
@@ -205,18 +202,6 @@ public class BackupService {
 
     private static boolean isAutomatic(BackupInfo backup) {
         return backup.name().endsWith(AUTOMATIC_SUFFIX);
-    }
-
-    private boolean isH2() {
-        String product = jdbc.execute((java.sql.Connection c) -> c.getMetaData().getDatabaseProductName());
-        return product != null && product.toLowerCase().contains("h2");
-    }
-
-    private void requireH2() {
-        if (!isH2()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "O backup interno só funciona com o banco embutido (H2). Com MySQL, use as ferramentas do próprio MySQL.");
-        }
     }
 
     private Path resolve(String name) {

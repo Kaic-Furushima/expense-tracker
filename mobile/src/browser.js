@@ -4,8 +4,12 @@ import {createBackupHttp} from './backups-http.js';
 import {createReportsHttp} from './reports-http.js';
 import {createApi} from './local-api/index.js';
 import {installNativeFiles} from './native-files.js';
+import {installNativeBack} from './native-back.js';
 import {installNativeNotifications} from './native-notifications.js';
 import {MAIN, Profiles} from './profiles.js';
+import {SyncService} from './sync/service.js';
+import {createSyncHttp} from './sync/sync-http.js';
+import {createRestoreHttp} from './restore-http.js';
 
 // Roda no WebView do aplicativo (ou em qualquer navegador): troca o servidor Java pela API local. O front-end
 // continua chamando fetch('/expenses...'); aqui essas chamadas sao respondidas pelo SQLite do proprio aparelho.
@@ -13,14 +17,15 @@ import {MAIN, Profiles} from './profiles.js';
 /** O front-end consulta isto (antes de a API local terminar de abrir) para trocar textos que so valem no PC. */
 window.localApp = true;
 
-const STATIC_PREFIXES = ['/js/', '/css/', '/icons/'];
-const STATIC_FILES = ['/', '/index.html', '/sw.js', '/manifest.webmanifest'];
+const STATIC_PREFIXES = ['/js/', '/css/', '/icons/', '/sync/'];
+const STATIC_FILES = ['/', '/index.html', '/sw.js', '/manifest.webmanifest', '/flavor.json', '/hub.json'];
 
 const IDB_NAME = 'expense-tracker';
 const IDB_VERSION = 2;
 const KV = 'kv';
 const BACKUPS = 'backups';
 const SAVE_DELAY_MS = 400;
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_BACKUP_CHECK_MS = 60 * 60 * 1000;
 /** Voltar para o app depois de tanto tempo em segundo plano pede a senha de novo (so se houver senha). */
 const LOCK_AFTER_BACKGROUND_MS = 5 * 60 * 1000;
@@ -92,6 +97,10 @@ const session = {
 };
 
 async function start() {
+    // a versao "sync" do APK traz flavor.json com sync:true; a "offline" nem tem permissao de internet
+    // servidor de sync padrao do build (mobile/sync-hub.json, copiado para hub.json); vazio = so "meu proprio projeto"
+    const central = await window.fetch('/hub.json').then(r => (r.ok ? r.json() : null)).catch(() => null);
+    const syncFlavor = await window.fetch('/flavor.json').then(r => (r.ok ? r.json() : null)).then(j => j?.sync === true).catch(() => false);
     const SQL = await initSqlJs({locateFile: file => `/js/${file}`});
     const idb = await openIdb();
     const backupBase = idbBackupStore(idb);
@@ -138,10 +147,17 @@ async function start() {
         openRuntime
     }).init();
 
+    // a conexao do sync e da pessoa (nao de um perfil): fica fora dos bancos e dos backups
+    const sync = await new SyncService({
+        store: {get: () => kvGet(idb, 'sync-config'), set: value => kvPut(idb, 'sync-config', value)},
+        profiles, available: syncFlavor, central
+    }).init();
+    const restoreHttp = createRestoreHttp({profiles, sync, backupsFor: (id, runtime) => runtime.backups});
+
     const access = await new Access({
         store: {get: () => kvGet(idb, 'password'), set: hash => kvPut(idb, 'password', hash), delete: () => kvDelete(idb, 'password')},
         session,
-        onReset: () => profiles.wipeAll()
+        onReset: () => profiles.wipeAll().then(() => sync.init())
     }).init();
 
     addEventListener('pagehide', () => profiles.runtime.flush());
@@ -163,6 +179,12 @@ async function start() {
     autoBackup();
     setInterval(autoBackup, AUTO_BACKUP_CHECK_MS);
 
+    // sincronizacao automatica (so na versao com sync e com a conexao feita): ao abrir, ao voltar ao app e de tempos em tempos
+    const syncMaybe = () => sync.maybeSync();
+    syncMaybe();
+    setInterval(syncMaybe, SYNC_INTERVAL_MS);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncMaybe(); });
+
     window.expenseTrackerLocal = {
         profiles, access,
         get api() { return profiles.runtime.api; },
@@ -170,10 +192,11 @@ async function start() {
         flush: () => profiles.runtime.flush()
     };
     installNativeNotifications(() => profiles.runtime.api); // so no Android: avisos agendados (do perfil em uso)
-    return {profiles, access};
+    return {profiles, access, sync, restoreHttp};
 }
 
 installNativeFiles();
+installNativeBack(); // botao voltar do Android
 const ready = start();
 
 // <img src="/attachments/ID"> nao passa pelo fetch: troca o endereco por um blob lido do banco local.
@@ -217,7 +240,7 @@ window.fetch = async function (input, init = {}) {
     const url = new URL(request ? request.url : String(input), location.href);
     if (!isLocalCall(url)) return realFetch(input, init);
 
-    const {profiles, access} = await ready;
+    const {profiles, access, sync, restoreHttp} = await ready;
     const method = (init.method || (request && request.method) || 'GET').toUpperCase();
     let body = init.body ?? null;
     if (typeof body === 'string' && body) {
@@ -230,6 +253,8 @@ window.fetch = async function (input, init = {}) {
             access.guard(); // com senha e sem entrar, nenhuma chamada de dados passa
             const {api, backups, reportsHttp} = profiles.runtime;
             result = await profiles.handle(method, url.pathname, body)
+                ?? await createSyncHttp(() => sync).handle(method, url.pathname, body)
+                ?? await restoreHttp.handle(method, url.pathname, body)
                 ?? await backups.handle(method, url.pathname, body)
                 ?? await reportsHttp.handle(method, url.pathname, Object.fromEntries(url.searchParams))
                 ?? api.handle(method, url.pathname + url.search, body);
@@ -245,6 +270,7 @@ window.fetch = async function (input, init = {}) {
     // Alteracao so e confirmada depois de gravada no aparelho: fechar o app logo em seguida nao perde nada.
     if (method !== 'GET') {
         await profiles.runtime.flush();
+        if (!url.pathname.startsWith('/api/sync')) sync.notifyChange(); // agenda um sync logo depois de salvar
         if (window.nativeNotifications) window.nativeNotifications.refreshSoon(); // contas e limites mudaram: reagenda os avisos
     }
     if (result.bytes !== undefined) {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Versão offline: o app funciona todo no aparelho, sem acesso a internet (tools:node tira também o que alguma biblioteca acrescente). -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+</manifest>

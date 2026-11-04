@@ -24,12 +24,12 @@ public interface RecurringOccurrenceRepository extends JpaRepository<RecurringOc
 
     /** A transaction that was deleted no longer backs its occurrence: skip it so auto-pay does not recreate it. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update RecurringOccurrence o set o.expense = null, o.status = :status, o.paidDate = null "
+    @Query("update RecurringOccurrence o set o.expense = null, o.status = :status, o.paidDate = null, o.updatedAt = current_timestamp "
             + "where o.expense.id = :expenseId")
     void detachExpense(Long expenseId, OccurrenceStatus status);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update RecurringOccurrence o set o.expense = null, o.status = :status, o.paidDate = null "
+    @Query("update RecurringOccurrence o set o.expense = null, o.status = :status, o.paidDate = null, o.updatedAt = current_timestamp "
             + "where o.expense is not null")
     void detachAllExpenses(OccurrenceStatus status);
 }

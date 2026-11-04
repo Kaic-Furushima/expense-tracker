@@ -1,5 +1,6 @@
 package com.kaic.expensetracker.service;
 
+import com.kaic.expensetracker.model.TransactionType;
 import com.kaic.expensetracker.profile.ProfileService;
 import com.kaic.expensetracker.repository.CategoryRepository;
 import org.springframework.boot.ApplicationRunner;
@@ -29,6 +30,10 @@ public class DefaultCategories {
                 "es", new String[]{"Comida", "Supermercado", "Vivienda", "Transporte", "Salud", "Ocio", "Educación",
                         "Suscripciones", "Inversiones", "Salario", "Otros"});
 
+        private static final int INVESTMENTS = 8;
+        private static final int SALARY = 9;
+        private static final int OTHER = 10;
+
         private final CategoryRepository repository;
         private final CategoryService service;
         private final ProfileService profiles;
@@ -46,7 +51,12 @@ public class DefaultCategories {
             }
             String[] names = NAMES.getOrDefault(profiles.language(), NAMES.get("pt"));
             for (int i = 0; i < DEFAULTS.length; i++) {
-                service.create(names[i], DEFAULTS[i][0], DEFAULTS[i][1]);
+                if (i != INVESTMENTS && i != SALARY) { // those two are income, the rest is for expenses
+                    service.create(names[i], DEFAULTS[i][0], DEFAULTS[i][1], null, TransactionType.EXPENSE);
+                }
+            }
+            for (int i : new int[]{INVESTMENTS, SALARY, OTHER}) {
+                service.create(names[i], DEFAULTS[i][0], DEFAULTS[i][1], null, TransactionType.INCOME);
             }
         }
     }

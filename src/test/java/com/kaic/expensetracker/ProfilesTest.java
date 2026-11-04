@@ -42,6 +42,9 @@ class ProfilesTest {
                 profiles.remove(p.id());
             }
         }
+        for (ProfileService.TrashedProfile t : profiles.trashed()) {
+            profiles.purge(t.id());
+        }
         profiles.select(ProfileContext.MAIN);
         profiles.setLanguage("pt");
         expenseService.deleteAll();
@@ -124,19 +127,64 @@ class ProfilesTest {
     }
 
     @Test
-    void removingAProfileKeepsItsFolderAndNeverTouchesTheMainOne() {
+    void removingAProfileMovesItToTheTrashAndDeletingForGoodKeepsTheFolderAside() {
         ProfileService.Profile other = profiles.create("Temporário");
         java.nio.file.Path folder = profiles.folderOf(other.id());
         assertTrue(java.nio.file.Files.isDirectory(folder));
+        String syncId = profiles.syncIdOf(other.id());
 
         profiles.remove(other.id());
 
-        assertFalse(profiles.exists(other.id()));
-        assertFalse(java.nio.file.Files.isDirectory(folder), "a pasta original saiu do caminho");
-        assertTrue(java.nio.file.Files.isDirectory(folder.resolveSibling(".")), "mas continua dentro de profiles/");
+        assertFalse(profiles.exists(other.id()), "nobody can switch to a trashed profile");
+        assertTrue(profiles.existsAny(other.id()));
+        assertTrue(java.nio.file.Files.isDirectory(folder), "the trash deletes nothing");
+        assertEquals(List.of("Temporário"), profiles.trashed().stream().map(ProfileService.TrashedProfile::name).toList());
+        assertEquals(1, profiles.list().size());
         assertEquals(400, status(() -> profiles.remove(ProfileContext.MAIN)));
         assertEquals(404, status(() -> profiles.remove("naoexiste")));
-        assertEquals(1, profiles.list().size());
+        assertEquals(404, status(() -> profiles.remove(other.id())), "already in the trash");
+
+        assertEquals(400, status(() -> profiles.purge(ProfileContext.MAIN)));
+        profiles.purge(other.id());
+        assertFalse(profiles.existsAny(other.id()));
+        assertFalse(java.nio.file.Files.isDirectory(folder), "the original folder moved away");
+        assertTrue(java.nio.file.Files.isDirectory(folder.resolveSibling(".")), "but it stays inside profiles/");
+        assertTrue(profiles.purged().stream().anyMatch(x -> x.syncId().equals(syncId)), "the sync will tell the other devices");
+        profiles.forgetPurged(syncId);
+    }
+
+    @Test
+    void aTrashedProfileCanBeRestoredAndTheNameIsKeptFreeOfClashes() {
+        ProfileService.Profile first = profiles.create("Casa");
+        profiles.remove(first.id());
+        ProfileService.Profile second = profiles.create("Casa"); // the name is free while the other is in the trash
+        assertEquals(409, status(() -> profiles.create("casa")));
+
+        ProfileService.Profile back = profiles.restore(first.id());
+
+        assertEquals("Casa (2)", back.name());
+        assertTrue(profiles.exists(first.id()));
+        assertTrue(profiles.trashed().isEmpty());
+        assertEquals(404, status(() -> profiles.restore(first.id())), "no longer in the trash");
+        assertNotEquals(profiles.syncIdOf(first.id()), profiles.syncIdOf(second.id()));
+    }
+
+    @Test
+    void theTrashDoesNotCountAgainstTheLimit() {
+        for (int i = 0; i < ProfileService.MAX_PROFILES - 1; i++) {
+            ProfileService.Profile p = profiles.create("P" + i);
+            profiles.remove(p.id());
+        }
+        assertEquals(ProfileService.MAX_PROFILES - 1, profiles.trashed().size());
+        assertEquals("Novo", profiles.create("Novo").name());
+    }
+
+    @Test
+    void theSyncIdentityOfTheMainProfileIsAlwaysDefault() {
+        assertEquals("default", profiles.syncIdOf(ProfileContext.MAIN));
+        ProfileService.Profile other = profiles.create("Outro");
+        assertTrue(profiles.registry().stream().anyMatch(r -> r.id().equals(other.id()) && r.syncId().equals(profiles.syncIdOf(other.id()))));
+        assertNull(profiles.registry().stream().filter(r -> r.id().equals(other.id())).findFirst().orElseThrow().trashedAt());
     }
 
     @Test

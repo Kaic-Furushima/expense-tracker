@@ -1,6 +1,7 @@
 package com.kaic.expensetracker.service;
 
 import com.kaic.expensetracker.model.Category;
+import com.kaic.expensetracker.model.TransactionType;
 import com.kaic.expensetracker.repository.BudgetRepository;
 import com.kaic.expensetracker.repository.CategoryRepository;
 import com.kaic.expensetracker.repository.ExpenseRepository;
@@ -47,16 +48,27 @@ public class CategoryService {
 
     @Transactional
     public Category create(String name, String icon, String color) {
-        return create(name, icon, color, null);
+        return create(name, icon, color, null, TransactionType.EXPENSE);
     }
 
     @Transactional
     public Category create(String name, String icon, String color, Long parentId) {
-        if (categoryRepository.existsByNameIgnoreCase(name.trim())) {
+        return create(name, icon, color, parentId, TransactionType.EXPENSE);
+    }
+
+    /** A subcategory always has the kind of its parent (the {@code kind} given is ignored then). */
+    @Transactional
+    public Category create(String name, String icon, String color, Long parentId, TransactionType kind) {
+        Category category = new Category();
+        category.setKind(kind == null ? TransactionType.EXPENSE : kind);
+        Category parent = resolveParent(category, parentId);
+        if (parent != null) {
+            category.setKind(parent.getKind());
+        }
+        if (categoryRepository.existsByNameIgnoreCaseAndKind(name.trim(), category.getKind())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma categoria com esse nome.");
         }
-        Category category = new Category();
-        apply(category, name, icon, color, parentId);
+        apply(category, name, icon, color, parent);
         return categoryRepository.save(category);
     }
 
@@ -64,11 +76,49 @@ public class CategoryService {
     public Category update(Long id, String name, String icon, String color, Long parentId) {
         Category category = getOrThrow(id);
         boolean renamed = !category.getName().equalsIgnoreCase(name.trim());
-        if (renamed && categoryRepository.existsByNameIgnoreCase(name.trim())) {
+        if (renamed && categoryRepository.existsByNameIgnoreCaseAndKind(name.trim(), category.getKind())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma categoria com esse nome.");
         }
-        apply(category, name, icon, color, parentId);
+        apply(category, name, icon, color, resolveParent(category, parentId));
         return categoryRepository.save(category);
+    }
+
+    /**
+     * Copies a category (with its subcategories) to the other kind, so a name used for expenses can also be used for
+     * income and vice versa. A name that already exists in the target kind is kept as it is. Returns the copy.
+     */
+    @Transactional
+    public Category copyToOtherKind(Long id) {
+        Category source = getOrThrow(id);
+        TransactionType target = source.getKind() == TransactionType.EXPENSE ? TransactionType.INCOME : TransactionType.EXPENSE;
+        Category top = source.getParent() == null ? source : source.getParent();
+        Category topCopy = copyOne(top, target, null);
+        for (Category child : categoryRepository.findAllByOrderByNameAsc()) {
+            if (child.getParent() != null && child.getParent().getId().equals(top.getId())
+                    && (source.getParent() == null || child.getId().equals(source.getId()))) {
+                copyOne(child, target, topCopy.getId());
+            }
+        }
+        if (source.getParent() == null) {
+            return topCopy;
+        }
+        return categoryRepository.findAllByOrderByNameAsc().stream()
+                .filter(c -> c.getKind() == target && c.getName().equalsIgnoreCase(source.getName())).findFirst().orElse(topCopy);
+    }
+
+    private Category copyOne(Category from, TransactionType target, Long parentId) {
+        return categoryRepository.findAllByOrderByNameAsc().stream()
+                .filter(c -> c.getKind() == target && c.getName().equalsIgnoreCase(from.getName())).findFirst()
+                .orElseGet(() -> create(from.getName(), from.getIcon(), from.getColor(), parentId, target));
+    }
+
+    /** Fails unless the category is of the given kind (an expense takes an expense category, income an income one). */
+    public void requireKind(Category category, TransactionType type) {
+        if (category != null && category.getKind() != type) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, type == TransactionType.INCOME
+                    ? "Esta categoria é de despesa; escolha uma categoria de receita."
+                    : "Esta categoria é de receita; escolha uma categoria de despesa.");
+        }
     }
 
     /**
@@ -87,14 +137,20 @@ public class CategoryService {
 
     @Transactional
     public Category findOrCreate(String name, String icon, String color) {
-        return categoryRepository.findAll().stream()
-                .filter(c -> c.getName().equalsIgnoreCase(name))
-                .findFirst()
-                .orElseGet(() -> create(name, icon, color));
+        return findOrCreate(name, icon, color, TransactionType.EXPENSE);
     }
 
-    private void apply(Category category, String name, String icon, String color, Long parentId) {
-        category.setParent(resolveParent(category, parentId));
+    @Transactional
+    public Category findOrCreate(String name, String icon, String color, TransactionType kind) {
+        TransactionType wanted = kind == null ? TransactionType.EXPENSE : kind;
+        return categoryRepository.findAll().stream()
+                .filter(c -> c.getKind() == wanted && c.getName().equalsIgnoreCase(name))
+                .findFirst()
+                .orElseGet(() -> create(name, icon, color, null, wanted));
+    }
+
+    private void apply(Category category, String name, String icon, String color, Category parent) {
+        category.setParent(parent);
         category.setName(name.trim());
         category.setIcon(icon == null || icon.isBlank() ? "🏷️" : icon.trim());
         category.setColor(color == null || !color.matches("#[0-9a-fA-F]{6}") ? "#6750A4" : color);
@@ -109,6 +165,9 @@ public class CategoryService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uma categoria não pode ser subcategoria dela mesma.");
         }
         Category parent = getOrThrow(parentId);
+        if (category.getId() != null && parent.getKind() != category.getKind()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A subcategoria precisa ser do mesmo tipo da categoria principal.");
+        }
         if (parent.getParent() != null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Só existe um nível de subcategorias.");
         }

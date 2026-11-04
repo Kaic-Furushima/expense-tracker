@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 @Table(name = "expense_templates")
 @Getter
 @Setter
-public class ExpenseTemplate {
+public class ExpenseTemplate extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

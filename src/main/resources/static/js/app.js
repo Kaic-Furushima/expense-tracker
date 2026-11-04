@@ -1,5 +1,43 @@
 'use strict';
 
+/* ---------- Back button (Android) and browser back ----------
+   Every "layer" the person can go back out of (a form or calendar over the page, a page inside "Mais", a tab other than
+   Início) adds one history entry, so the system back button (and the browser's) closes the top layer instead of leaving
+   the app. Closing a layer with the on-screen button removes its entry again. */
+const backNav = {ignore: 0, layers: []};
+const layerHas = kind => backNav.layers.some(l => l.kind === kind);
+function layerOpen(kind, close) {
+    backNav.layers.push({kind, close});
+    history.pushState({layer: backNav.layers.length}, '');
+}
+function layerClose(kind) {
+    const i = backNav.layers.map(l => l.kind).lastIndexOf(kind);
+    if (i < 0) return;
+    if (i === backNav.layers.length - 1) {
+        backNav.layers.pop();
+        backNav.ignore++;
+        history.back();
+    } else {
+        backNav.layers[i] = {kind: 'spent', close: () => {}}; // not on top: its entry stays until back is pressed
+    }
+}
+window.addEventListener('popstate', () => {
+    if (backNav.ignore > 0) { backNav.ignore--; return; }
+    const top = backNav.layers.pop();
+    if (top) top.close();
+});
+/** Keeps the layers for "a page inside Mais" and "a tab other than Início" in step with what is on the screen. */
+function syncBackLayers() {
+    const want = {
+        tab: state.tab !== 'home',
+        sub: state.tab === 'more' && !!state.sub
+    };
+    const close = {sub: () => { state.sub = null; render(); window.scrollTo({top: 0}); }, tab: () => goTo('home')};
+    // the page inside Mais sits on top of its tab: leave in the reverse order, enter in this one
+    for (const kind of ['sub', 'tab']) if (!want[kind] && layerHas(kind)) layerClose(kind);
+    for (const kind of ['tab', 'sub']) if (want[kind] && !layerHas(kind)) layerOpen(kind, close[kind]);
+}
+
 /* ---------- Helpers ---------- */
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -19,6 +57,28 @@ const currencySymbol = () => (currencyFormat().formatToParts(0).find(p => p.type
 const pad = n => String(n).padStart(2, '0');
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const monthOf = (iso) => iso.slice(0, 7);
+const daysInMonth = ym => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+/** The given day of the month "yyyy-mm" as yyyy-mm-dd (a day the month does not have becomes its last day). */
+const dayInMonth = (ym, day) => `${ym}-${pad(Math.min(Math.max(1, day), daysInMonth(ym)))}`;
+/** Adds months to a date, keeping the day (or the last day of a shorter month). */
+const addMonthsIso = (iso, n) => dayInMonth(shiftMonth(iso.slice(0, 7), n), Number(iso.slice(8, 10)));
+/** The nth business day (Monday to Friday) of a month; past the last one it is the last one. */
+function nthBusinessDay(ym, n) {
+    const [y, m] = ym.split('-').map(Number);
+    let count = 0, last = 1;
+    for (let d = 1; d <= daysInMonth(ym); d++) {
+        const weekday = new Date(y, m - 1, d).getDay();
+        if (weekday > 0 && weekday < 6) { count++; last = d; if (count === n) return d; }
+    }
+    return last;
+}
+/** The first, second, third, fourth (1-4) or last (5) given weekday (0 = Sunday) of a month. */
+function nthWeekday(ym, weekday, ordinal) {
+    const [y, m] = ym.split('-').map(Number);
+    const days = [];
+    for (let d = 1; d <= daysInMonth(ym); d++) if (new Date(y, m - 1, d).getDay() === weekday) days.push(d);
+    return ordinal >= 5 ? days[days.length - 1] : (days[ordinal - 1] ?? days[days.length - 1]);
+}
 /** The JavaFX WebView renders <input type="date"> as a plain text box, so it gets its own dd/mm/aaaa field. */
 const nativeDatePicker = !/JavaFX/i.test(navigator.userAgent);
 const isoToBr = iso => iso.split('-').reverse().join('/');
@@ -39,9 +99,12 @@ function dateTimeBr(iso) {
     if (!iso) return '';
     return `${isoToBr(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
 }
+/** The tab being viewed lives only as long as the app is open: closing the app completely brings back the home screen. */
+const SESSION_KEYS = ['tab'];
+const storeFor = k => (SESSION_KEYS.includes(k) ? sessionStorage : localStorage);
 const safeStorage = {
-    get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } }
+    get: k => { try { return storeFor(k).getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { storeFor(k).setItem(k, v); } catch (e) { /* storage unavailable */ } }
 };
 
 /* ---------- Money typing (U3) ----------
@@ -287,17 +350,30 @@ function txCategoryLabel(t) {
     if (!t.categoryId) return 'Sem categoria';
     return catLabel(catById(t.categoryId) || {name: t.categoryName, parentId: t.categoryParentId});
 }
-/** Categories in display order: each top-level one followed by its subcategories. */
-function orderedCategories() {
-    const roots = state.categories.filter(c => !c.parentId).sort((a, b) => a.name.localeCompare(b.name, LOCALE));
+/**
+ * Categories in display order: each top-level one followed by its subcategories. With a {@code kind} (EXPENSE or
+ * INCOME) only the categories of that kind; expense and income categories are separate lists.
+ */
+function orderedCategories(kind = null) {
+    const all = kind ? state.categories.filter(c => c.kind === kind) : state.categories;
+    const roots = all.filter(c => !c.parentId).sort((a, b) => a.name.localeCompare(b.name, LOCALE));
     const result = [];
     roots.forEach(r => {
         result.push(r);
-        state.categories.filter(c => c.parentId === r.id).sort((a, b) => a.name.localeCompare(b.name, LOCALE)).forEach(c => result.push(c));
+        all.filter(c => c.parentId === r.id).sort((a, b) => a.name.localeCompare(b.name, LOCALE)).forEach(c => result.push(c));
     });
     // a subcategory whose parent is missing should never disappear
-    state.categories.filter(c => c.parentId && !catById(c.parentId)).forEach(c => result.push(c));
+    all.filter(c => c.parentId && !all.some(p => p.id === c.parentId)).forEach(c => result.push(c));
     return result;
+}
+/** The kind of category a transaction type takes. */
+const kindOf = type => (type === 'INCOME' ? 'INCOME' : 'EXPENSE');
+/** In lists that mix both kinds, income categories are marked (the same name may exist in both). */
+const catOptionLabel = c => catLabel(c) + (c.kind === 'INCOME' ? ` (${T('receita')})` : '');
+/** {@code <option>}s with the categories of one kind (the one a type of transaction takes). */
+function categoryOptions(type, selected, none = 'Sem categoria') {
+    return `<option value="">${esc(none)}</option>` + orderedCategories(kindOf(type)).map(c =>
+        `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('');
 }
 
 /* ---------- Theme ---------- */
@@ -324,7 +400,7 @@ async function loadAll({keepScroll = true} = {}) {
         // Occurrences first: loading them creates (and, when enabled, pays) what is due, which the lists below must show.
         state.occurrences = await api(`/recurring/occurrences?month=${state.month}`);
         const accountParam = state.accountFilter ? `&accountId=${state.accountFilter}` : '';
-        const [categories, accounts, methods, settings, pots, wishes, tags, pending, summary, transactions, transfers, attachCounts, templates, profiles] = await Promise.all([
+        const [categories, accounts, methods, settings, pots, wishes, tags, pending, summary, transactions, transfers, attachCounts, templates, profiles, syncStatus] = await Promise.all([
             api('/categories'),
             api('/accounts'),
             api('/payment-methods'),
@@ -338,8 +414,10 @@ async function loadAll({keepScroll = true} = {}) {
             api(`/transfers?month=${state.month}${accountParam}`),
             api('/attachments/counts'),
             api('/templates'),
-            api('/profiles')
+            api('/profiles'),
+            api('/api/sync').catch(() => ({available: false}))
         ]);
+        state.sync = syncStatus;
         state.categories = categories;
         state.accounts = accounts;
         state.methods = methods;
@@ -391,6 +469,7 @@ function render() {
     $('.month-switch').hidden = !monthScreen;
     $('#account-btn').hidden = !accountScreen;
     ({home: renderHome, transactions: renderTransactions, budgets: renderBudgets, goals: renderGoals, more: renderMore})[state.tab]();
+    syncBackLayers();
 }
 
 function avatar(icon, color, extra = '') {
@@ -670,7 +749,7 @@ function renderTransactions() {
         ${f.open ? `<div class="card filters">
             <div class="grid2">
                 <div class="field"><label for="fl-cat">Categoria</label><select id="fl-cat"><option value="">Todas</option>${orderedCategories().map(c =>
-                    `<option value="${c.id}" ${String(c.id) === String(f.categoryId) ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('')}</select></div>
+                    `<option value="${c.id}" ${String(c.id) === String(f.categoryId) ? 'selected' : ''}>${esc(catOptionLabel(c))}</option>`).join('')}</select></div>
                 <div class="field"><label for="fl-method">Forma de pagamento</label><select id="fl-method"><option value="">Todas</option>${state.methods.map(m =>
                     `<option value="${m.id}" ${String(m.id) === String(f.methodId) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
             </div>
@@ -828,7 +907,7 @@ function renderBudgets() {
     const s = state.summaryAll;
     const withBudget = s.categories.filter(c => c.budget != null);
     const budgetedIds = new Set(withBudget.map(c => c.categoryId));
-    const free = orderedCategories().filter(c => !budgetedIds.has(c.id));
+    const free = orderedCategories('EXPENSE').filter(c => !budgetedIds.has(c.id));
     const carryText = c => {
         const carry = Number(c.carry || 0);
         if (!s.budgetRollover || carry === 0) return '';
@@ -890,12 +969,13 @@ function confirmDialog(message, {okLabel = 'Confirmar', danger = true} = {}) {
                 <button type="button" class="btn" id="confirm-no">Cancelar</button>
                 <button type="button" class="btn ${danger ? 'danger-fill' : 'primary'}" id="confirm-yes">${esc(okLabel)}</button>
             </div></div></div>`;
-        const done = value => { root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(value); };
+        const done = value => { layerClose('confirm'); root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(value); };
         const onKey = e => {
             if (e.key === 'Escape') { e.stopPropagation(); done(false); }
             if (e.key === 'Enter') { e.preventDefault(); done(true); }
         };
         document.addEventListener('keydown', onKey, true);
+        layerOpen('confirm', () => done(false));
         $('#confirm-no', root).onclick = () => done(false);
         $('#confirm-yes', root).onclick = () => done(true);
         $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) done(false); });
@@ -913,10 +993,12 @@ function openSheet(html) {
     const root = $('#sheet-root');
     root.innerHTML = `<div class="overlay"><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div></div>`;
     sheetOpener = opener;
+    if (!layerHas('sheet')) layerOpen('sheet', closeSheet);
     $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) closeSheet(); });
     return $('.sheet', root);
 }
 function closeSheet() {
+    layerClose('sheet');
     $('#sheet-root').innerHTML = '';
     const opener = sheetOpener;
     sheetOpener = null;
@@ -1034,20 +1116,26 @@ function openTransactionSheet(item, prefill) {
             <div class="field suggest-host"><label for="f-name" id="f-name-label">Descrição</label><input id="f-name" maxlength="120" autocomplete="off" value="${esc(isTransfer ? item.description : src?.name)}">
                 <div class="suggest-list" id="f-suggest" hidden></div></div>
             <div class="field" data-for="tx"><label>Categoria</label><div class="cat-picker" id="f-cats"></div></div>
-            <div class="field" data-for="tx"><label for="f-account">Conta</label><select id="f-account">${accountOptions(!isTransfer && src && src.accountId ? src.accountId : fromDefault)}</select></div>
+            <div class="field" data-for="tx"><label for="f-account">Conta</label><select id="f-account" data-create="account">${accountOptions(!isTransfer && src && src.accountId ? src.accountId : fromDefault)}</select></div>
             <div class="grid2" data-for="transfer">
-                <div class="field"><label for="f-from">De</label><select id="f-from">${accountOptions(fromDefault)}</select></div>
-                <div class="field"><label for="f-to">Para</label><select id="f-to">${accountOptions(toDefault)}</select></div>
+                <div class="field"><label for="f-from">De</label><select id="f-from" data-create="account">${accountOptions(fromDefault)}</select></div>
+                <div class="field"><label for="f-to">Para</label><select id="f-to" data-create="account">${accountOptions(toDefault)}</select></div>
             </div>
-            <p class="small muted" data-for="transfer" style="margin-top:-6px">Mover dinheiro entre contas não é receita nem despesa. Para registrar um investimento, transfira para a conta (ou parte dela) onde ele fica guardado.</p>
+            <div data-for="transfer">${tip('transfer', `Mover dinheiro entre contas não é receita nem despesa. Para registrar um investimento, transfira para a conta (ou parte dela) onde ele fica guardado.`)}</div>
             ${dateField('f-date', date, 'Data')}
             <div class="field" data-for="tx"><label>Situação</label>
-                <div class="chips" id="f-status"><button type="button" class="chip" data-status="PAID">Pago</button><button type="button" class="chip" data-status="PENDING">A pagar / receber</button></div></div>
+                <div class="chips" id="f-status"><button type="button" class="chip" data-status="PAID" id="f-paid-chip">Pago</button><button type="button" class="chip" data-status="PENDING" id="f-pending-chip">A pagar</button></div></div>
             <div class="field" data-for="installments"><label for="f-inst">Parcelas</label>
                 <input id="f-inst" inputmode="numeric" maxlength="2" value="1" autocomplete="off">
-                <span class="small muted" id="f-inst-hint">À vista. Para parcelar, informe em quantas vezes (o valor acima é o total da compra).</span></div>
+                <span class="small muted" id="f-inst-hint">À vista</span>
+                <div id="f-plan" class="plan" hidden>
+                    <div class="chips" id="f-plan-mode"></div>
+                    <div id="f-plan-opts"></div>
+                    <div id="f-plan-rows" class="plan-rows"></div>
+                    <span class="small muted" id="f-plan-sum"></span>
+                </div></div>
             ${editing && !isTransfer && item.installmentTotal ? `<p class="small muted audit">Parcela ${item.installmentNumber} de ${item.installmentTotal} desta compra. Alterar aqui muda só esta parcela.</p>` : ''}
-            <div class="field" data-for="tx"><label for="f-method">Forma de pagamento</label><select id="f-method">${options(state.methods, src?.paymentMethodId, {none: '—'})}</select></div>
+            <div class="field" data-for="tx"><label for="f-method">Forma de pagamento</label><select id="f-method" data-create="method">${options(state.methods, src?.paymentMethodId, {none: '—'})}</select></div>
             <div class="field" data-for="tx"><label for="f-tags">Tags</label><input id="f-tags" maxlength="200" placeholder="#viagem, trabalho" autocomplete="off" value="${esc((src?.tags || []).map(t => '#' + t).join(' '))}">
                 ${suggestions.length ? `<span class="tag-suggest">${suggestions.map(t => `<button type="button" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}</span>` : ''}</div>
             <div class="field" data-for="tx"><label for="f-desc">Observação</label><textarea id="f-desc" rows="2" maxlength="255">${esc(src?.description && !isTransfer ? src.description : '')}</textarea></div>
@@ -1059,7 +1147,7 @@ function openTransactionSheet(item, prefill) {
             </div>
             <div class="form-actions">
                 ${editing ? '<button type="button" class="btn danger" id="f-del">Excluir</button>' : ''}
-                ${editing && !isTransfer && item.status === 'PENDING' ? '<button type="button" class="btn" id="f-pay">Pagar hoje</button>' : ''}
+                ${editing && !isTransfer && item.status === 'PENDING' ? `<button type="button" class="btn" id="f-pay">${item.type === 'INCOME' ? 'Receber hoje' : 'Pagar hoje'}</button>` : ''}
                 ${editing && !isTransfer && item.installmentTotal && item.installmentNumber < item.installmentTotal ? '<button type="button" class="btn danger" id="f-del-following">Excluir esta e as próximas</button>' : ''}
                 <button type="submit" class="btn primary">Salvar</button>
             </div>
@@ -1075,6 +1163,13 @@ function openTransactionSheet(item, prefill) {
         $('#f-title', sheet).textContent = editing ? (transfer ? 'Editar transferência' : 'Editar lançamento') : (transfer ? 'Nova transferência' : 'Novo lançamento');
         $('#f-name-label', sheet).textContent = transfer ? 'Descrição (opcional)' : 'Descrição';
         $('#f-name', sheet).placeholder = transfer ? 'Ex.: Aporte na caixinha' : 'Ex.: Almoço';
+        // paid / to pay read differently for income: received / to receive
+        $('#f-paid-chip', sheet).textContent = T(mode === 'INCOME' ? 'Recebido' : 'Pago');
+        $('#f-pending-chip', sheet).textContent = T(mode === 'INCOME' ? 'A receber' : 'A pagar');
+        const kind = kindOf(mode);
+        const chosen = catById(categoryId);
+        if (chosen && chosen.kind !== kind) categoryId = null; // an expense category does not fit an income, and vice versa
+        if ($('#f-cats', sheet).dataset.kind !== kind) paintCats();
     };
     const paintStatus = () => {
         $$('#f-status .chip', sheet).forEach(b => b.classList.toggle('active', b.dataset.status === status));
@@ -1082,13 +1177,37 @@ function openTransactionSheet(item, prefill) {
         if (label) label.textContent = status === 'PENDING' && mode !== 'TRANSFER' ? 'Vencimento' : 'Data';
     };
     const paintCats = () => {
-        const options = [{id: null, name: 'Nenhuma', icon: 'minus', color: '#9E9E9E'}, ...orderedCategories()];
+        const kind = kindOf(mode);
+        const options = [{id: null, name: 'Nenhuma', icon: 'minus', color: '#9E9E9E'}, ...orderedCategories(kind)];
+        $('#f-cats', sheet).dataset.kind = kind;
         $('#f-cats', sheet).innerHTML = options.map(c =>
-            `<button type="button" class="cat-opt ${c.id === categoryId ? 'active' : ''}" data-id="${c.id ?? ''}" title="${esc(catLabel(c))}">${avatar(c.icon, c.color)}<span>${c.parentId ? '↳ ' : ''}${esc(c.name)}</span></button>`).join('');
-        $$('.cat-opt', sheet).forEach(b => b.onclick = () => { categoryId = b.dataset.id ? Number(b.dataset.id) : null; paintCats(); });
+            `<button type="button" class="cat-opt ${c.id === categoryId ? 'active' : ''}" data-id="${c.id ?? ''}" title="${esc(catLabel(c))}">${avatar(c.icon, c.color)}<span>${c.parentId ? '↳ ' : ''}${esc(c.name)}</span></button>`).join('')
+            + `<button type="button" class="cat-opt cat-new" id="f-cat-new">${avatar('plus', '#9E9E9E')}<span>Nova</span></button>`;
+        const chosenCat = catById(categoryId);
+        if (chosenCat) {
+            const del = document.createElement('button');
+            del.type = 'button'; del.className = 'btn danger'; del.style.gridColumn = '1 / -1';
+            del.textContent = T('Excluir categoria “{}”').replace('{}', chosenCat.name);
+            del.onclick = async () => {
+                if (!await confirmDialog(`Excluir a categoria “${chosenCat.name}”? Os lançamentos ficam sem categoria.`, {okLabel: 'Excluir'})) return;
+                try {
+                    await api(`/categories/${chosenCat.id}`, {method: 'DELETE'});
+                    state.categories = await api('/categories');
+                    categoryId = null;
+                    paintCats();
+                    toast('Categoria excluída');
+                } catch (err) { toast(err.message); }
+            };
+            $('#f-cats', sheet).appendChild(del);
+        }
+        $$('.cat-opt[data-id]', sheet).forEach(b => b.onclick = () => { categoryId = b.dataset.id ? Number(b.dataset.id) : null; paintCats(); });
+        $('#f-cat-new', sheet).onclick = async () => {
+            const created = await quickCreate('category', {categoryKind: kind});
+            if (created) { categoryId = created.id; paintCats(); }
+        };
     };
     $$('.seg button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); paintStatus(); });
-    $$('#f-status .chip', sheet).forEach(b => b.onclick = () => { status = b.dataset.status; paintStatus(); });
+    $$('#f-status .chip', sheet).forEach(b => b.onclick = () => { status = b.dataset.status; paintStatus(); if (installments() > 1) refreshPlan(); });
     $$('[data-tag]', sheet).forEach(b => b.onclick = () => {
         const input = $('#f-tags', sheet);
         if (!parseTags(input.value).includes(b.dataset.tag)) input.value = `${input.value.trim()} #${b.dataset.tag}`.trim();
@@ -1097,16 +1216,147 @@ function openTransactionSheet(item, prefill) {
         const n = Number($('#f-inst', sheet).value);
         return Number.isInteger(n) && n >= 1 ? Math.min(n, 60) : 1;
     };
-    const paintInstallments = () => {
-        const hint = $('#f-inst-hint', sheet);
-        const n = installments(), total = parseAmount($('#f-amount', sheet).value);
-        if (n < 2) { hint.textContent = 'À vista. Para parcelar, informe em quantas vezes (o valor acima é o total da compra).'; return; }
-        const each = total > 0 ? ` ${n}× de ${money(Math.floor((total / n) * 100) / 100)}.` : '';
-        hint.textContent = `${each} O valor acima é o total. As próximas parcelas caem nos meses seguintes e ficam “a pagar” (no cartão de crédito já entram na fatura).`.trim();
+
+    /* Installment plan: each installment has its own date, amount and situation. The rule picked (same day every month,
+       a cycle of days, "5th business day" / "last Saturday", or one by one) only fills the dates; every row stays editable. */
+    let planMode = 'same';
+    let plan = [];
+    const planOpts = {days: '', rule: 'business', nth: 5, ordinal: 1, weekday: 6};
+    const PLAN_MODES = [['same', 'Mesmo dia todo mês'], ['cycle', 'Ciclo de dias'], ['rule', 'Dia do mês'], ['manual', 'Uma por uma']];
+    const isCard = () => (state.accounts.find(x => x.id === Number($('#f-account', sheet).value)) || {}).type === 'CREDIT_CARD';
+    const defaultPlanStatus = i => (i === 0 || isCard() ? status : 'PENDING');
+    const firstDate = () => dateValue() || date;
+    const planDate = (i, first) => {
+        const ym = shiftMonth(first.slice(0, 7), i);
+        if (planMode === 'cycle') {
+            const days = planOpts.days.split(/[^0-9]+/).map(Number).filter(d => d >= 1 && d <= 31);
+            return dayInMonth(ym, days.length ? days[i % days.length] : Number(first.slice(8)));
+        }
+        if (planMode === 'rule') {
+            return planOpts.rule === 'business' ? dayInMonth(ym, nthBusinessDay(ym, planOpts.nth))
+                : dayInMonth(ym, nthWeekday(ym, planOpts.weekday, planOpts.ordinal));
+        }
+        return addMonthsIso(first, i);
     };
-    $('#f-inst', sheet).oninput = paintInstallments;
+    const rebuildPlan = () => {
+        const n = installments();
+        if (n < 2) { plan = []; return; }
+        const first = firstDate();
+        const next = [];
+        for (let i = 0; i < n; i++) {
+            const old = plan[i];
+            let when;
+            if (planMode === 'manual') {
+                const last = next.length ? brToIso(next[next.length - 1].date) : first;
+                when = old ? old.date : isoToBr(addMonthsIso(last || first, next.length ? 1 : 0));
+            } else {
+                when = isoToBr(planDate(i, first));
+            }
+            next.push({date: when, amount: old ? old.amount : '', touched: !!(old && old.touched),
+                status: old && old.touched ? old.status : defaultPlanStatus(i)});
+        }
+        plan = next;
+    };
+    const planCents = text => (text && text.trim() ? Math.round(parseAmount(text) * 100) : null);
+    /** Cents each row gets: its own amount, or an equal share of what is left (the odd cents go to the first one). */
+    const planShares = () => {
+        const total = Math.round(parseAmount($('#f-amount', sheet).value) * 100) || 0;
+        const given = plan.map(p => planCents(p.amount));
+        const blank = given.filter(g => g == null).length;
+        const rest = total - given.reduce((sum, g) => sum + (g || 0), 0);
+        const each = blank ? Math.floor(rest / blank) : 0;
+        let first = true;
+        return {total, given, shares: given.map(g => {
+            if (g != null) return g;
+            const v = each + (first ? rest - each * blank : 0);
+            first = false;
+            return v;
+        }), blank};
+    };
+    const paintPlanHints = () => {
+        const n = installments();
+        const hint = $('#f-inst-hint', sheet), sum = $('#f-plan-sum', sheet);
+        if (n < 2) { hint.textContent = T('À vista'); return; }
+        const {total, shares, blank} = planShares();
+        hint.textContent = total > 0 ? T('{}× — o valor acima é o total da compra.').replace('{}', n) : T('Informe o valor acima: é o total da compra.');
+        $$('.plan-amount', sheet).forEach((input, i) => { input.placeholder = money((shares[i] || 0) / 100); });
+        const planned = shares.reduce((s, v) => s + v, 0);
+        sum.textContent = T('Soma das parcelas: {} · Compra: {}').replace('{}', money(planned / 100)).replace('{}', money(total / 100));
+        sum.classList.toggle('plan-bad', !blank && planned !== total);
+    };
+    const paintPlanRows = () => {
+        const box = $('#f-plan-rows', sheet);
+        box.innerHTML = plan.map((p, i) => `<div class="plan-row" data-i="${i}">
+            <span class="plan-n">${i + 1}/${plan.length}</span>
+            <input class="plan-date" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" value="${esc(p.date)}" aria-label="${esc(T('Vencimento da parcela'))} ${i + 1}">
+            <input class="plan-amount" inputmode="numeric" autocomplete="off" value="${esc(p.amount)}" aria-label="${esc(T('Valor da parcela'))} ${i + 1}">
+            <button type="button" class="chip plan-status ${p.status === 'PAID' ? 'active' : ''}">${T(p.status === 'PAID' ? (mode === 'INCOME' ? 'Recebido' : 'Pago') : 'A pagar')}</button></div>`).join('');
+        $$('.plan-row', box).forEach(row => {
+            const i = Number(row.dataset.i);
+            const dateInput = $('.plan-date', row), amountInput = $('.plan-amount', row);
+            bindAmountInput(amountInput);
+            dateInput.addEventListener('input', () => {
+                const digits = dateInput.value.replace(/\D/g, '').slice(0, 8);
+                dateInput.value = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
+                plan[i].date = dateInput.value;
+                if (planMode !== 'manual') { planMode = 'manual'; paintPlanMode(); } // changing a date by hand means "one by one"
+            });
+            amountInput.addEventListener('input', () => { plan[i].amount = amountInput.value; paintPlanHints(); });
+            $('.plan-status', row).onclick = () => {
+                plan[i].status = plan[i].status === 'PAID' ? 'PENDING' : 'PAID';
+                plan[i].touched = true;
+                paintPlanRows();
+            };
+        });
+        paintPlanHints();
+    };
+    const paintPlanOptions = () => {
+        const box = $('#f-plan-opts', sheet);
+        if (planMode === 'cycle') {
+            box.innerHTML = `<div class="field"><label for="f-cycle">Dias do vencimento, em ciclo</label>
+                <input id="f-cycle" inputmode="numeric" maxlength="40" placeholder="Ex.: 2, 3" autocomplete="off" value="${esc(planOpts.days)}">
+                <span class="small muted">Cada parcela usa o próximo dia da lista; no fim, volta ao primeiro (2, 3 → 2, 3, 2, 3…).</span></div>`;
+            $('#f-cycle', sheet).oninput = e => { planOpts.days = e.target.value; rebuildPlan(); paintPlanRows(); };
+        } else if (planMode === 'rule') {
+            const weekdays = Array.from({length: 7}, (_, d) => new Date(2024, 0, 7 + d).toLocaleDateString(LOCALE, {weekday: 'long'}));
+            box.innerHTML = `<div class="field"><label for="f-rule">O vencimento cai no</label>
+                <select id="f-rule"><option value="business" ${planOpts.rule === 'business' ? 'selected' : ''}>N-ésimo dia útil do mês</option>
+                    <option value="weekday" ${planOpts.rule === 'weekday' ? 'selected' : ''}>Certo dia da semana do mês</option></select></div>
+                ${planOpts.rule === 'business'
+                    ? `<div class="field"><label for="f-nth">Qual dia útil (segunda a sexta)</label><input id="f-nth" type="number" min="1" max="23" inputmode="numeric" value="${planOpts.nth}"></div>`
+                    : `<div class="grid2">
+                        <div class="field"><label for="f-ordinal">Qual</label><select id="f-ordinal">${[[1, 'Primeiro'], [2, 'Segundo'], [3, 'Terceiro'], [4, 'Quarto'], [5, 'Último']].map(([v, l]) =>
+                            `<option value="${v}" ${planOpts.ordinal === v ? 'selected' : ''}>${T(l)}</option>`).join('')}</select></div>
+                        <div class="field"><label for="f-weekday">Dia da semana</label><select id="f-weekday">${weekdays.map((w, d) =>
+                            `<option value="${d}" ${planOpts.weekday === d ? 'selected' : ''}>${esc(w)}</option>`).join('')}</select></div></div>`}`;
+            $('#f-rule', sheet).onchange = e => { planOpts.rule = e.target.value; paintPlanOptions(); rebuildPlan(); paintPlanRows(); };
+            const nth = $('#f-nth', sheet);
+            if (nth) nth.oninput = () => { planOpts.nth = Math.min(23, Math.max(1, Number(nth.value) || 1)); rebuildPlan(); paintPlanRows(); };
+            const ordinal = $('#f-ordinal', sheet), weekday = $('#f-weekday', sheet);
+            if (ordinal) ordinal.onchange = () => { planOpts.ordinal = Number(ordinal.value); rebuildPlan(); paintPlanRows(); };
+            if (weekday) weekday.onchange = () => { planOpts.weekday = Number(weekday.value); rebuildPlan(); paintPlanRows(); };
+        } else {
+            box.innerHTML = planMode === 'same' ? '' : `<span class="small muted">${T('Ajuste a data, o valor e a situação de cada parcela.')}</span>`;
+        }
+    };
+    const paintPlanMode = () => {
+        $('#f-plan-mode', sheet).innerHTML = PLAN_MODES.map(([k, l]) => `<button type="button" class="chip ${k === planMode ? 'active' : ''}" data-plan="${k}">${T(l)}</button>`).join('');
+        $$('[data-plan]', sheet).forEach(b => b.onclick = () => { planMode = b.dataset.plan; paintPlanMode(); rebuildPlan(); paintPlanRows(); });
+        paintPlanOptions();
+    };
+    /** Shows or hides the plan when the number of installments, the date, the status or the account changes. */
+    const refreshPlan = () => {
+        const many = installments() > 1;
+        $('#f-plan', sheet).hidden = !many;
+        rebuildPlan();
+        if (many) { paintPlanRows(); if (!$('#f-plan-mode', sheet).children.length) paintPlanMode(); } else paintPlanHints();
+    };
+    const paintInstallments = paintPlanHints;
+    $('#f-inst', sheet).oninput = refreshPlan;
+    $('#f-date', sheet).addEventListener('input', () => { if (installments() > 1) refreshPlan(); });
+    $('#f-account', sheet).addEventListener('change', () => { if (installments() > 1) refreshPlan(); });
     bindAmountInput($('#f-amount', sheet));
-    $('#f-amount', sheet).addEventListener('input', paintInstallments);
+    $('#f-amount', sheet).addEventListener('input', paintPlanHints);
     paintMode();
     paintStatus();
     paintCats();
@@ -1202,18 +1452,33 @@ function openTransactionSheet(item, prefill) {
             description: $('#f-desc', sheet).value.trim() || null,
             tags: parseTags($('#f-tags', sheet).value)
         };
-        if (!editing && mode === 'EXPENSE' && installments() > 1) body.installments = installments();
+        if (!editing && mode === 'EXPENSE' && installments() > 1) {
+            const slots = [];
+            for (let i = 0; i < plan.length; i++) {
+                const when = brToIso(plan[i].date);
+                if (!when) return toast(T('Parcela {}: informe uma data válida.').replace('{}', i + 1));
+                const cents = planCents(plan[i].amount);
+                if (cents != null && !(cents > 0)) return toast(T('Parcela {}: o valor deve ser maior que zero.').replace('{}', i + 1));
+                slots.push({date: when, status: plan[i].status, amount: cents == null ? null : cents / 100});
+            }
+            const {total, blank, shares} = planShares();
+            if (!blank && shares.reduce((s, v) => s + v, 0) !== total) return toast(T('A soma das parcelas é diferente do total da compra.'));
+            if (blank && shares.some(v => v <= 0)) return toast(T('O valor é pequeno demais para tantas parcelas.'));
+            body.installmentPlan = slots;
+        }
         safeStorage.set('lastAccount', String(body.accountId));
         run(() => api(editing ? `/expenses/${item.id}` : '/expenses', {method: editing ? 'PUT' : 'POST', body}),
             editing ? 'Lançamento atualizado' : 'Lançamento salvo');
     };
 }
 
-function openCategorySheet(cat) {
+function openCategorySheet(cat, newKind = null) {
+    const kind = cat ? cat.kind : (newKind || state.catKind || 'EXPENSE');
     const hasChildren = !!cat && state.categories.some(c => c.parentId === cat.id);
-    const parents = state.categories.filter(c => !c.parentId && (!cat || c.id !== cat.id));
+    const parents = state.categories.filter(c => c.kind === kind && !c.parentId && (!cat || c.id !== cat.id));
+    const otherName = kind === 'EXPENSE' ? 'Receitas' : 'Despesas';
     const sheet = openSheet(`
-        <h2>${cat ? 'Editar categoria' : 'Nova categoria'}</h2>
+        <h2>${cat ? (kind === 'INCOME' ? 'Editar categoria de receita' : 'Editar categoria de despesa') : (kind === 'INCOME' ? 'Nova categoria de receita' : 'Nova categoria de despesa')}</h2>
         <form id="cat-form" novalidate>
             <div class="field"><label for="c-name">Nome</label><input id="c-name" maxlength="60" value="${esc(cat?.name)}"></div>
             <div class="field"><label>Cor</label><div class="swatches" id="c-colors"></div></div>
@@ -1226,6 +1491,7 @@ function openCategorySheet(cat) {
                 ${cat ? '<button type="button" class="btn danger" id="c-del">Excluir</button>' : ''}
                 <button type="submit" class="btn primary">Salvar</button>
             </div>
+            ${cat ? `<div class="form-actions sub-actions"><button type="button" class="btn" id="c-copy">${ico('copy')} ${kind === 'EXPENSE' ? 'Copiar para Receitas' : 'Copiar para Despesas'}</button></div>` : ''}
         </form>`);
     const colorOf = colorPicker(sheet, '#c-colors', cat?.color || '#6750A4');
     let icon = iconKey(cat?.icon) || cat?.icon || 'tag';
@@ -1243,6 +1509,7 @@ function openCategorySheet(cat) {
         if (typed) { icon = typed; paintIcons(); }
     };
     if (cat) {
+        $('#c-copy', sheet).onclick = () => run(() => api(`/categories/${cat.id}/copy`, {method: 'POST'}), `Copiada para ${otherName}`);
         $('#c-del', sheet).onclick = async () => {
             const extra = hasChildren ? ' As subcategorias viram categorias principais.' : '';
             if (await confirmDialog(`Excluir a categoria “${cat.name}”? Os lançamentos ficam sem categoria.${extra}`, {okLabel: 'Excluir'}))
@@ -1253,7 +1520,7 @@ function openCategorySheet(cat) {
         e.preventDefault();
         const name = $('#c-name', sheet).value.trim();
         if (!name) return toast('Informe o nome da categoria.');
-        const body = {name, icon, color: colorOf(), parentId: hasChildren ? null : nextId($('#c-parent', sheet).value)};
+        const body = {name, icon, color: colorOf(), kind, parentId: hasChildren ? null : nextId($('#c-parent', sheet).value)};
         run(() => api(cat ? `/categories/${cat.id}` : '/categories', {method: cat ? 'PUT' : 'POST', body}), 'Categoria salva');
     };
 }
@@ -1266,7 +1533,7 @@ function openBudgetSheet(target) {
     const isTotal = target === 'total';
     const s = state.summaryAll;
     const budgeted = new Map(s.categories.filter(c => c.budget != null).map(c => [c.categoryId, c]));
-    const choices = target && !isTotal ? state.categories.filter(c => c.id === target) : orderedCategories().filter(c => !budgeted.has(c.id));
+    const choices = target && !isTotal ? state.categories.filter(c => c.id === target) : orderedCategories('EXPENSE').filter(c => !budgeted.has(c.id));
     const currentBase = isTotal ? s.totalBudgetBase : (target ? budgeted.get(target)?.budgetBase : null);
     const exists = currentBase != null;
     const monthName = monthLabel(state.month);

@@ -1,6 +1,7 @@
 package com.kaic.expensetracker.controller;
 
 import com.kaic.expensetracker.model.Category;
+import com.kaic.expensetracker.model.TransactionType;
 import com.kaic.expensetracker.service.CategoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -36,8 +37,14 @@ public class CategoryController {
 
     @PostMapping
     public ResponseEntity<CategoryResponse> create(@Valid @RequestBody CategoryRequest request) {
-        Category saved = categoryService.create(request.name(), request.icon(), request.color(), request.parentId());
+        Category saved = categoryService.create(request.name(), request.icon(), request.color(), request.parentId(), request.kind());
         return ResponseEntity.status(HttpStatus.CREATED).body(CategoryResponse.fromEntity(saved));
+    }
+
+    /** Copies a category (and its subcategories) to the other kind: expense to income, or income to expense. */
+    @PostMapping("/{id}/copy")
+    public ResponseEntity<CategoryResponse> copy(@PathVariable Long id) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(CategoryResponse.fromEntity(categoryService.copyToOtherKind(id)));
     }
 
     @PutMapping("/{id}")
@@ -54,13 +61,17 @@ public class CategoryController {
     public record CategoryRequest(@NotBlank(message = "Informe o nome da categoria.") @Size(max = 60, message = "O nome pode ter até 60 caracteres.") String name,
                                   @Size(max = 16, message = "O ícone é longo demais.") String icon,
                                   @Size(max = 7, message = "A cor deve ser um código como #6750A4.") String color,
-                                  Long parentId) {
+                                  Long parentId,
+                                  TransactionType kind) {
+        public CategoryRequest(String name, String icon, String color, Long parentId) {
+            this(name, icon, color, parentId, null);
+        }
     }
 
-    public record CategoryResponse(Long id, String name, String icon, String color, Long parentId) {
+    public record CategoryResponse(Long id, String name, String icon, String color, Long parentId, TransactionType kind) {
         public static CategoryResponse fromEntity(Category c) {
             return new CategoryResponse(c.getId(), c.getName(), c.getIcon(), c.getColor(),
-                    c.getParent() == null ? null : c.getParent().getId());
+                    c.getParent() == null ? null : c.getParent().getId(), c.getKind());
         }
     }
 }

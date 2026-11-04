@@ -116,7 +116,7 @@ function openInvoicePayment(account, list, index, invoice) {
             <input class="amount-input" id="p-amount" inputmode="decimal" autocomplete="off" value="${fmtInput(invoice.remaining)}" aria-label="Valor">
             <div class="field"><label for="p-from">Pagar com a conta</label><select id="p-from">${orderedAccounts(sources).map(a => `<option value="${a.id}" ${a.id === defaultFromAccount(sources) ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
             ${dateField('p-date', todayIso(), 'Data do pagamento')}
-            <p class="small muted">O pagamento é uma transferência da conta para o cartão: não conta como despesa de novo (as compras já foram contadas). Pode pagar só uma parte.</p>
+            ${tip('invoice-pay', `O pagamento é uma transferência da conta para o cartão: não conta como despesa de novo (as compras já foram contadas). Pode pagar só uma parte.`)}
             <div class="form-actions"><button type="button" class="btn" id="p-back">Voltar</button><button type="submit" class="btn primary">Pagar</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'p-date');
@@ -149,7 +149,7 @@ async function renderBackupPage() {
     let backups;
     try { backups = await api('/backups'); } catch (e) { toast(e.message); return; }
     $('#view').innerHTML = `<div class="stack">${pageHeader('Backup e restauração')}
-        <p class="small muted">Um backup é uma cópia de <strong>tudo</strong>: lançamentos, contas, categorias, orçamentos, metas e configurações. Fica guardado ${window.localApp ? 'dentro do aplicativo' : 'na pasta de dados do aplicativo'}; guarde também uma cópia ${window.localApp ? 'fora do celular' : 'fora do computador'} (nuvem ou pen drive).</p>
+        ${tip('backup', `Um backup é uma cópia de <strong>tudo</strong>: lançamentos, contas, categorias, orçamentos, metas e configurações. Fica guardado ${window.localApp ? 'dentro do aplicativo' : 'na pasta de dados do aplicativo'}; guarde também uma cópia ${window.localApp ? 'fora do celular' : 'fora do computador'} (nuvem ou pen drive).`)}
         <button class="btn primary block" id="make-backup">${ico('shield')} Fazer backup agora</button>
         <h2 class="section-title">Backups guardados</h2>
         ${backups.length ? `<div class="list">${backups.map((b, i) => {
@@ -169,20 +169,66 @@ async function renderBackupPage() {
     $('#restore-file').onclick = async () => {
         const content = await pickTextFile('.sql,.json,.txt');
         if (!content) return;
-        if (!await confirmDialog('Substituir TUDO o que está no aplicativo pelo conteúdo deste arquivo? Uma cópia do que existe agora será guardada antes.', {okLabel: 'Restaurar'})) return;
-        restoreWith(() => api('/backups/restore', {method: 'POST', body: {content}}));
+        openRestoreSheet({content}, 'Conteúdo do arquivo escolhido');
     };
 }
 
-async function restoreWith(action) {
-    try {
-        await action();
-        state.sub = null;
-        await loadAll();
-        toast('Backup restaurado');
-    } catch (e) {
-        toast(e.message);
-    }
+/** Asks where to restore (over an existing profile or into a new one) and how, then restores. source: {name} or {content}. */
+function openRestoreSheet(source, label) {
+    const profiles = state.profiles.profiles;
+    const current = state.profiles.current;
+    const syncOn = !!(state.sync && state.sync.configured);
+    const sheet = openSheet(`<h2>Restaurar backup</h2>
+        <p class="small muted sheet-sub">${esc(label)}</p>
+        <div class="list" role="radiogroup" aria-label="Onde restaurar">
+            ${profiles.map(p => `<label class="row"><input type="radio" name="rs-target" value="${esc(p.id)}" ${p.id === current ? 'checked' : ''}>
+                <span class="grow title">Sobrescrever “${esc(p.name)}”${p.id === current ? ' (em uso)' : ''}</span></label>`).join('')}
+            <label class="row"><input type="radio" name="rs-target" value="__new">
+                <span class="grow title">Criar um perfil novo com este backup</span></label>
+        </div>
+        <div class="field" id="rs-new-box" hidden><label for="rs-new">Nome do perfil novo</label>
+            <input id="rs-new" maxlength="40" autocomplete="off" placeholder="Ex.: Recuperado"></div>
+        <div id="rs-over" class="stack-tight">
+            <p class="small" style="color:var(--warn);margin:0">Sobrescrever não tem volta. Tudo o que está no perfil escolhido será substituído pelo conteúdo do backup.</p>
+            ${syncOn ? '<p class="small" style="color:var(--warn);margin:0">Como o sync está ligado, a nuvem e os seus outros aparelhos também serão sobrescritos, à força: o que o backup não tiver será apagado lá.</p>' : ''}
+            <label class="switch-row"><input type="checkbox" id="rs-backup" checked>
+                <span><strong>Fazer um backup deste perfil antes de sobrescrever</strong>${info(`Fica guardado em Backup e restauração, para você poder voltar.`)}</span></label>
+        </div>
+        <div class="form-actions"><button type="button" class="btn" id="rs-cancel">Cancelar</button>
+            <button type="button" class="btn danger-fill" id="rs-go">Restaurar</button></div>`);
+    const choice = () => $('input[name="rs-target"]:checked', sheet).value;
+    const paint = () => {
+        const isNew = choice() === '__new';
+        $('#rs-new-box', sheet).hidden = !isNew;
+        $('#rs-over', sheet).hidden = isNew;
+        $('#rs-go', sheet).textContent = isNew ? 'Criar perfil e restaurar' : 'Sobrescrever e restaurar';
+        $('#rs-go', sheet).className = isNew ? 'btn primary' : 'btn danger-fill';
+        if (isNew) $('#rs-new', sheet).focus();
+    };
+    $$('input[name="rs-target"]', sheet).forEach(r => r.onchange = paint);
+    paint();
+    $('#rs-cancel', sheet).onclick = closeSheet;
+    $('#rs-go', sheet).onclick = async () => {
+        const isNew = choice() === '__new';
+        const name = $('#rs-new', sheet).value.trim();
+        if (isNew && !name) return toast('Dê um nome ao perfil novo.');
+        const body = isNew ? {newProfileName: name} : {profileId: choice(), backupFirst: $('#rs-backup', sheet).checked};
+        if (source.content != null) body.content = source.content;
+        closeSheet();
+        try {
+            const result = await busy(() => api(source.name ? `/backups/${source.name}/restore` : '/backups/restore', {method: 'POST', body}), 'Restaurando…');
+            state.profiles = await api('/profiles');
+            const target = state.profiles.profiles.find(p => p.id === result.profileId);
+            state.sub = null;
+            if (result.created) toast(`Perfil “${target ? target.name : name}” criado com o backup`);
+            else if (result.profileId === state.profiles.current) toast('Backup restaurado');
+            else toast(`Backup restaurado em “${target ? target.name : ''}”`);
+            if (result.syncError) toast(`Restaurado, mas a nuvem não foi atualizada agora: ${result.syncError}`);
+            await loadAll();
+        } catch (e) {
+            toast(e.message);
+        }
+    };
 }
 
 function openBackupSheet(backup) {
@@ -195,10 +241,9 @@ function openBackupSheet(backup) {
             <button class="row" id="b-save"><span class="avatar" style="background:var(--surface-2)">${ico('download')}</span><span class="grow title">${window.localApp ? 'Salvar ou enviar uma cópia…' : 'Salvar uma cópia no computador…'}</span></button>
             <button class="row" id="b-del"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Excluir este backup</span></button>
         </div>`);
-    $('#b-restore', sheet).onclick = async () => {
-        if (!await confirmDialog(`Substituir TUDO o que está no aplicativo pelo backup de ${l.when}? Uma cópia do que existe agora será guardada antes.`, {okLabel: 'Restaurar'})) return;
+    $('#b-restore', sheet).onclick = () => {
         closeSheet();
-        restoreWith(() => api(`/backups/${backup.name}/restore`, {method: 'POST'}));
+        openRestoreSheet({name: backup.name}, `Backup de ${l.when}`);
     };
     $('#b-save', sheet).onclick = async () => {
         try {
@@ -213,6 +258,160 @@ function openBackupSheet(backup) {
     };
 }
 
+/* ---------- Sync (PC <-> phone, through the user's own Supabase project) ---------- */
+function syncWhen(ms) {
+    if (!ms) return 'ainda não sincronizou';
+    const d = new Date(ms);
+    return `${d.toLocaleDateString()} às ${d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+}
+
+/** Copies the SQL that prepares a Supabase project (served with the app, so it works offline and on the phone too). */
+async function copySyncScript() {
+    let text;
+    try {
+        const res = await fetch('/sync/supabase-hub.sql');
+        if (!res.ok) throw new Error(String(res.status));
+        text = await res.text();
+    } catch (e) { toast('Não foi possível ler o script.'); return; }
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (e) {
+        const box = document.createElement('textarea');
+        box.value = text;
+        box.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(box);
+        box.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (err) { /* sem permissão */ }
+        box.remove();
+        if (!ok) { toast('Não foi possível copiar. Abra /sync/supabase-hub.sql no navegador e copie o texto.'); return; }
+    }
+    toast('Script copiado. Cole no SQL Editor do Supabase.');
+}
+
+function syncTutorial(central, open) {
+    const own = `<ol class="small tutorial">
+        <li>Crie uma conta grátis em supabase.com e um projeto novo (guarde a senha do banco; não vamos usá-la).</li>
+        <li>No projeto, abra SQL Editor › New query, cole o script (o botão abaixo o copia) e clique em Run. Isso cria as tabelas, já protegidas por usuário.
+            <div><button type="button" class="btn small" data-copy-sql>Copiar o script</button></div></li>
+        <li>Abra Authentication › Sign In / Providers › Email e desligue “Confirm email”. Se ficar ligado, a conta criada aqui não consegue entrar antes de confirmar o e-mail.</li>
+        <li>Abra Project Settings › API. Copie a Project URL e a chave anon public e cole nos campos acima.</li>
+        <li>Escolha um e-mail e uma senha para a sua conta, marque “Criar a conta agora” e defina a senha de sincronização.</li>
+        <li>No outro aparelho: mesma tela, mesma URL e chave, mesmo e-mail e senhas, mas sem marcar “Criar a conta agora”.</li>
+        <li>Pronto. Por segurança, depois de criar a sua conta, desligue em Authentication › Sign In / Providers a opção “Allow new users to sign up”, para ninguém mais criar conta no seu projeto.</li>
+    </ol>
+    <p class="small muted">No plano grátis do Supabase, um projeto sem nenhuma atividade por cerca de 7 dias é pausado. Os dados ficam guardados e dá para reativar pelo botão “Restore” do painel; enquanto isso o sync mostra “sem conexão”. Usar o app normalmente já conta como atividade.</p>`;
+    const std = `<ol class="small tutorial">
+        <li>Neste primeiro aparelho, escolha Servidor padrão, digite um e-mail e uma senha para a conta e marque “Criar a conta agora”.</li>
+        <li>Defina a senha de sincronização (8 caracteres ou mais). Ela cifra os seus dados antes de saírem do aparelho e não pode ser recuperada: guarde-a em um lugar seguro.</li>
+        <li>Toque em Conectar e sincronizar.</li>
+        <li>No outro aparelho: abra a mesma tela, escolha Servidor padrão, use o mesmo e-mail e as mesmas senhas e não marque “Criar a conta agora”.</li>
+        <li>Pronto: a partir daí sincroniza ao abrir o app, depois de salvar algo e de tempos em tempos.</li>
+    </ol>`;
+    return `<details class="card" ${open ? 'open' : ''}><summary><strong>Como configurar</strong></summary>
+        ${central ? `<h3 class="small" style="margin:.8rem 0 .2rem">Com o servidor padrão</h3>${std}` : ''}
+        <h3 class="small" style="margin:.8rem 0 .2rem">${central ? 'Com o seu próprio projeto Supabase' : 'Com o seu projeto Supabase'}</h3>${own}
+    </details>`;
+}
+
+async function renderSyncPage() {
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Sincronização')}<div class="skeleton"></div></div>`;
+    bindBack();
+    let st;
+    try { st = await api('/api/sync'); state.sync = st; } catch (e) { toast(e.message); return; }
+    const head = pageHeader('Sincronização');
+    if (!st.configured) {
+        const central = !!st.central;
+        $('#view').innerHTML = `<div class="stack">${head}
+            <p class="small muted">Mantém o computador e o celular com os mesmos dados. Tudo é cifrado antes de sair do aparelho com a sua senha de sincronização: o servidor guarda só texto ilegível. É opcional: sem conectar, o app funciona normalmente.</p>
+            <form class="card stack-tight" id="sync-form" autocomplete="off">
+                ${central ? `<div class="chips" role="radiogroup" aria-label="Servidor">
+                    <button type="button" class="chip active" data-mode="central" role="radio" aria-checked="true">Servidor padrão</button>
+                    <button type="button" class="chip" data-mode="own" role="radio" aria-checked="false">Meu próprio projeto</button></div>
+                    <p class="small muted" id="sy-mode-help" style="margin:0">O mais simples: só e-mail e senha. Os dados ficam cifrados no servidor do aplicativo.</p>` : ''}
+                <div id="sy-own" class="stack-tight" ${central ? 'hidden' : ''}>
+                    <div class="field" style="margin:0"><label for="sy-url">Endereço do projeto Supabase</label>
+                        <input id="sy-url" type="url" placeholder="https://xxxx.supabase.co" value="${esc(st.url || '')}"></div>
+                    <div class="field" style="margin:0"><label for="sy-key">Chave pública (anon)</label>
+                        <input id="sy-key" type="text" spellcheck="false"></div>
+                </div>
+                <div class="field" style="margin:0"><label for="sy-email">E-mail da conta</label>
+                    <input id="sy-email" type="email" required value="${esc(st.email || '')}"></div>
+                <div class="field" style="margin:0"><label for="sy-pass">Senha da conta</label>
+                    <input id="sy-pass" type="password" required minlength="6"></div>
+                <label class="switch-row"><input type="checkbox" id="sy-create">
+                    <span><strong>Criar a conta agora</strong>${info(`Marque só no primeiro aparelho; nos outros, entre com a mesma conta.`)}</span></label>
+                <div class="field" style="margin:0"><label for="sy-secret">Senha de sincronização</label>
+                    <input id="sy-secret" type="password" required minlength="8">
+                    <span class="small muted">Cifra os seus dados. Use a mesma nos dois aparelhos. Se esquecer, os dados na nuvem não podem ser recuperados (os que estão nos aparelhos continuam).</span></div>
+                <button class="btn primary block" type="submit">${ico('repeat')} Conectar e sincronizar</button>
+            </form>
+            ${syncTutorial(central, false)}
+        </div>`;
+        bindBack();
+        let mode = central ? 'central' : 'own';
+        const own = () => { $('#sy-url').required = $('#sy-key').required = mode === 'own'; };
+        own();
+        $$('[data-mode]').forEach(b => b.onclick = () => {
+            mode = b.dataset.mode;
+            $$('[data-mode]').forEach(x => { x.classList.toggle('active', x === b); x.setAttribute('aria-checked', String(x === b)); });
+            $('#sy-own').hidden = mode !== 'own';
+            $('#sy-mode-help').textContent = mode === 'own'
+                ? 'Os dados ficam no seu projeto Supabase, na sua conta. Veja “Como configurar” abaixo.'
+                : 'O mais simples: só e-mail e senha. Os dados ficam cifrados no servidor do aplicativo.';
+            own();
+        });
+        $$('[data-copy-sql]').forEach(b => b.onclick = copySyncScript);
+        $('#sync-form').onsubmit = async ev => {
+            ev.preventDefault();
+            const body = {email: $('#sy-email').value.trim(), password: $('#sy-pass').value, syncPassword: $('#sy-secret').value,
+                createAccount: $('#sy-create').checked, useCentral: mode === 'central'};
+            if (mode === 'own') { body.url = $('#sy-url').value.trim(); body.anonKey = $('#sy-key').value.trim(); }
+            try {
+                state.sync = await busy(() => api('/api/sync', {method: 'PUT', body}), 'Conectando…');
+                if (state.sync.lastError) toast(state.sync.lastError); else { toast('Sincronizado'); await loadAll(); }
+                renderSyncPage();
+            } catch (e) { toast(e.message); }
+        };
+        return;
+    }
+    $('#view').innerHTML = `<div class="stack">${head}
+        <div class="card stack-tight">
+            <div><strong>${esc(st.email)}</strong><div class="small muted">${st.mode === 'central' ? 'Servidor padrão' : esc(st.url)}</div></div>
+            <div class="small">Última sincronização: ${syncWhen(st.lastSyncAt)}</div>
+            ${st.unsent ? `<div class="small muted">${st.unsent} alterações aguardando envio</div>` : ''}
+            ${st.pending ? `<div class="small muted">${st.pending} alterações recebidas esperando outra para poderem entrar</div>` : ''}
+            ${st.skippedAttachments ? `<div class="small muted">${st.skippedAttachments} anexos maiores que 3 MB ficam só neste aparelho</div>` : ''}
+            ${st.lastError ? `<div class="small" style="color:var(--warn)">${esc(st.lastError)}</div>` : ''}
+            <button class="btn primary block" id="sync-now">${ico('repeat')} Sincronizar agora</button>
+        </div>
+        <div class="card stack-tight">
+            <label class="switch-row"><input type="checkbox" id="sync-auto" ${st.autoSync ? 'checked' : ''}>
+                <span><strong>Sincronizar automaticamente</strong>${info(`Ao abrir, depois de salvar algo e de tempos em tempos. Sem internet, as alterações esperam e seguem quando voltar.`)}</span></label>
+        </div>
+        <details class="card"><summary><strong>Conectar outro aparelho</strong></summary>
+            <p class="small">${st.mode === 'central' ? 'No outro aparelho, abra Mais › Sincronização, escolha Servidor padrão e use o mesmo e-mail e as mesmas senhas (a da conta e a de sincronização). Não marque “Criar a conta agora”.' : `No outro aparelho, abra Mais › Sincronização e use o mesmo projeto Supabase (${esc(st.url)}), o mesmo e-mail e as mesmas senhas (a da conta e a de sincronização). Não marque “Criar a conta agora”.`}</p>
+        </details>
+        <button class="btn block" id="sync-off">Desconectar este aparelho</button>
+        <p class="small muted center">Desconectar não apaga nenhum dado, nem deste aparelho nem da nuvem.</p>
+    </div>`;
+    bindBack();
+    $('#sync-now').onclick = async () => {
+        try {
+            state.sync = await busy(() => api('/api/sync/now', {method: 'POST'}), 'Sincronizando…');
+            if (state.sync.lastError) toast(state.sync.lastError); else { toast('Sincronizado'); await loadAll(); }
+            renderSyncPage();
+        } catch (e) { toast(e.message); }
+    };
+    $('#sync-auto').onchange = async e => {
+        try { state.sync = await api('/api/sync/auto', {method: 'PUT', body: {enabled: e.target.checked}}); } catch (err) { toast(err.message); }
+    };
+    $('#sync-off').onclick = async () => {
+        if (!await confirmDialog('Desconectar este aparelho do sync? Os dados continuam aqui e na nuvem.', {okLabel: 'Desconectar'})) return;
+        try { state.sync = await api('/api/sync', {method: 'DELETE'}); renderSyncPage(); } catch (err) { toast(err.message); }
+    };
+}
+
 /* ---------- Import ---------- */
 const importState = {content: null, fileName: '', accountId: null, invert: false, preview: null, keep: [], rows: []};
 const IMPORT_FORMATS = {OFX: 'extrato OFX', BANK_CSV: 'planilha de banco/cartão', APP_CSV: 'CSV exportado deste aplicativo'};
@@ -222,13 +421,13 @@ function renderImportPage() {
     if (s.accountId == null || !accountById(s.accountId)) s.accountId = defaultAccountId();
     const accounts = activeAccounts();
     $('#view').innerHTML = `<div class="stack">${pageHeader('Importar lançamentos')}
-        <p class="small muted">Aceita o extrato do banco (<strong>OFX</strong>), uma planilha <strong>CSV</strong> com data, descrição e valor (banco ou cartão) e o CSV que este aplicativo exporta. Você confere tudo antes de salvar; nada é gravado até confirmar.</p>
+        ${tip('import', `Aceita o extrato do banco (<strong>OFX</strong>), uma planilha <strong>CSV</strong> com data, descrição e valor (banco ou cartão) e o CSV que este aplicativo exporta. Você confere tudo antes de salvar; nada é gravado até confirmar.`)}
         <div class="card stack-tight">
             <div class="field" style="margin:0"><label for="imp-account">Conta que recebe os lançamentos</label>
                 <select id="imp-account">${accountOptions(s.accountId)}</select>
                 <span class="small muted">Vale para extratos e planilhas de banco. O CSV deste aplicativo já diz a conta de cada linha.</span></div>
             <label class="switch-row"><input type="checkbox" id="imp-invert" ${s.invert ? 'checked' : ''}>
-                <span><strong>Inverter entradas e saídas</strong><span class="small muted" style="display:block">Use se o arquivo mostrar compras como números positivos e o app as tratar como receitas (ou o contrário).</span></span></label>
+                <span><strong>Inverter entradas e saídas</strong>${info(`Use se o arquivo mostrar compras como números positivos e o app as tratar como receitas (ou o contrário).`)}</span></label>
             <button class="btn primary block" id="imp-pick">${ico('upload')} Escolher arquivo…</button>
         </div>
         <div id="imp-review"></div>
@@ -267,7 +466,7 @@ function paintImportReview() {
     const transferRows = s.rows.filter(r => r.kind === 'TRANSFER').length;
     const catOptions = (row) => `<option value="">Sem categoria</option>`
         + (row.categoryName && row.categoryId == null ? `<option value="new" ${row.categorySel === 'new' ? 'selected' : ''}>Nova: ${esc(row.categoryName)}</option>` : '')
-        + orderedCategories().map(c => `<option value="${c.id}" ${String(c.id) === row.categorySel ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('');
+        + orderedCategories(kindOf(row.type)).map(c => `<option value="${c.id}" ${String(c.id) === row.categorySel ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('');
     const rowHtml = (r, i) => {
         const transfer = r.kind === 'TRANSFER';
         const income = r.type === 'INCOME';

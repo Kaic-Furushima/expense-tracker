@@ -9,15 +9,20 @@ import lombok.Setter;
 @Table(name = "categories")
 @Getter
 @Setter
-public class Category {
+public class Category extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @NotBlank(message = "Informe o nome da categoria.")
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String name;
+
+    /** EXPENSE or INCOME: a category belongs to one kind of transaction only; the name is unique within a kind. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private TransactionType kind = TransactionType.EXPENSE;
 
     /** Icon key (or, for old data, an emoji) shown next to the category. */
     private String icon;

@@ -17,7 +17,7 @@ import java.time.LocalDate;
 @Table(name = "wish_items")
 @Getter
 @Setter
-public class WishItem {
+public class WishItem extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

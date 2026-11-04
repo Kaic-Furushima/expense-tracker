@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 @Table(name = "accounts")
 @Getter
 @Setter
-public class Account {
+public class Account extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

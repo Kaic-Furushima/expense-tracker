@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @Table(name = "attachments")
 @Getter
 @Setter
-public class Attachment {
+public class Attachment extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -14,7 +14,7 @@ import java.time.LocalDate;
 @Table(name = "recurring_occurrences")
 @Getter
 @Setter
-public class RecurringOccurrence {
+public class RecurringOccurrence extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

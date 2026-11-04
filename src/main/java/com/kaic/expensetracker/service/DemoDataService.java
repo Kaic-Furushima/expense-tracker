@@ -71,9 +71,9 @@ public class DemoDataService {
                 addPending(m, 28, "Conta de luz", "Moradia", "142.30", santander);
             }
         }
-        budgetService.upsert(category("Alimentação").getId(), new BigDecimal("500"));
-        budgetService.upsert(category("Mercado").getId(), new BigDecimal("700"));
-        budgetService.upsert(category("Transporte").getId(), new BigDecimal("150"));
+        budgetService.upsert(category("Alimentação", TransactionType.EXPENSE).getId(), new BigDecimal("500"));
+        budgetService.upsert(category("Mercado", TransactionType.EXPENSE).getId(), new BigDecimal("700"));
+        budgetService.upsert(category("Transporte", TransactionType.EXPENSE).getId(), new BigDecimal("150"));
     }
 
     /** Sends every transaction and transfer to the trash. */
@@ -82,8 +82,8 @@ public class DemoDataService {
         expenseService.deleteAll();
     }
 
-    private Category category(String name) {
-        return categoryService.findOrCreate(name, null, PALETTE[Math.floorMod(name.hashCode(), PALETTE.length)]);
+    private Category category(String name, TransactionType kind) {
+        return categoryService.findOrCreate(name, null, PALETTE[Math.floorMod(name.hashCode(), PALETTE.length)], kind);
     }
 
     private PaymentMethod method(String name) {
@@ -118,7 +118,7 @@ public class DemoDataService {
         e.setDate(date);
         e.setType(type);
         e.setStatus(status);
-        e.setCategory(category(category));
+        e.setCategory(category(category, type));
         e.setAccount(account);
         e.setPaymentMethod(paymentMethod == null ? null : method(paymentMethod));
         expenseService.save(e);

@@ -32,12 +32,12 @@ describe('primeiro uso', () => {
         const accounts = ok('GET', '/accounts');
         assert.deepEqual(accounts.map(a => a.name), ['Conta principal']);
         assert.equal(accounts[0].balance, 0);
-        assert.equal(ok('GET', '/categories').length, 11);
+        assert.equal(ok('GET', '/categories').length, 12);
     });
 
     it('nao duplica os dados iniciais ao reabrir o mesmo banco', () => {
         const again = createApi(api.db.sql, {clock: () => new Date(2026, 4, 15)});
-        assert.equal(again.handle('GET', '/categories').body.length, 11);
+        assert.equal(again.handle('GET', '/categories').body.length, 12);
         assert.equal(again.handle('GET', '/accounts').body.length, 1);
     });
 

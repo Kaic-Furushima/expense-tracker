@@ -1,7 +1,7 @@
 # Expense Tracker para Android
 
 O mesmo front-end do app (`src/main/resources/static`), empacotado com o [Capacitor](https://capacitorjs.com) num APK.
-**Não precisa de servidor nem de internet:** a lógica que no computador roda em Java (Spring) roda aqui em JavaScript,
+**Não precisa de servidor nem de internet** (o build `offline` nem tem a permissão; o build `sync` usa a internet só se você ligar a sincronização): a lógica que no computador roda em Java (Spring) roda aqui em JavaScript,
 dentro do aparelho, com SQLite (sql.js, WebAssembly). O front-end continua chamando `fetch('/expenses…')`; o arquivo
 `src/browser.js` intercepta essas chamadas e a API local (`src/local-api/`) responde.
 
@@ -26,7 +26,8 @@ Precisa do [Android Studio](https://developer.android.com/studio) (traz o SDK e 
 
 ```bash
 npm run android:open   # empacota, sincroniza e abre o projeto no Android Studio (Run ▶ para instalar no celular/emulador)
-npm run android:apk    # ou gera direto: android/app/build/outputs/apk/debug/app-debug.apk
+npm run android:apk:offline   # APK sem permissão de internet: android/app/build/outputs/apk/offline/debug/
+npm run android:apk:sync      # APK com sincronização PC ⇄ celular: android/app/build/outputs/apk/sync/debug/ (pacote com sufixo .sync)
 ```
 
 No Windows, o caminho do projeto tem "ó" (`Códigos`); por isso `android/gradle.properties` traz `android.overridePathCheck=true`
@@ -95,12 +96,15 @@ Android 13+); se for recusada, há o botão "Ativar notificações" no sino. Est
 (Android 15)**: os avisos ficaram agendados para as 9h, usando alarme inexato (não pede a permissão "Alarmes e lembretes"); confira num aparelho real o primeiro agendamento (crie uma conta a pagar para amanhã e veja se o aviso chega às 9h).
 A ordem sugerida está no fim deste arquivo.
 
-## Sincronização com a nuvem (futuro)
+## Sincronização com o computador
 
-O esquema já foi pensado para isso (`src/local-api/schema.js`): toda tabela tem `uuid` (identidade estável entre PC e celular)
-e `updated_at`, e a exclusão é lógica (`deleted_at`) nos lançamentos e transferências. A sincronização será "enviar e receber o que
-mudou desde a última vez" contra um servidor na nuvem, resolvendo conflitos pelo `updated_at` mais recente.
-Antes disso, convém: guardar a data da última sincronização e estender `deleted_at` às demais tabelas.
+Opcional e só no build `sync` (a flavor `sync` tem a permissão de internet e um `flavor.json` com `sync: true`; a `offline` não tem nenhuma das duas).
+O código está em `src/sync/`: `tables.js` (o formato dos dados, o mesmo do computador), `crypto.js` (PBKDF2 → AES-GCM), `engine.js` (enviar o que mudou,
+ler o que mudou, vale a alteração mais recente, chaves estrangeiras por uuid, registros iguais criados nos dois lados viram um só),
+`registry.js` (a lista de perfis), `service.js` (conexão, gatilhos automáticos) e `hub-supabase.js` (o cliente do Supabase). O esquema do hub está em
+`../src/main/resources/static/sync/supabase-hub.sql`. A tela e o passo a passo são os mesmos do computador (Mais → Sincronização).
+Cada tabela sincronizada tem gatilhos do SQLite que anotam as mudanças em `sync_outbox`; anexos acima de 3 MB não sincronizam.
+O servidor padrão (opcional) vem de `sync-hub.json` (`url` e `anonKey`), copiado para `www/hub.json` no build.
 
 ## Cuidados
 
@@ -109,9 +113,9 @@ Antes disso, convém: guardar a data da última sincronização e estender `dele
 - Dinheiro é guardado em centavos inteiros (`*_cents`).
 - Para mudar o esquema, acrescente uma entrada em `MIGRATIONS` (`schema.js`); nunca edite as antigas.
 
-## Próximo passo
+## Botão voltar do Android
 
-A sincronização com a nuvem (ver acima) é o que resta do plano original.
+O Capacitor sozinho fecha o app ao apertar voltar. `src/native-back.js` (plugin `@capacitor/app`) faz o botão voltar pelas "camadas" do front-end (formulário aberto, página dentro de Mais, aba que não é o Início) e só sai do app quando não há mais nada para voltar.
 
 O PDF usa as fontes padrão do formato (Helvetica), que só têm os caracteres do Windows-1252: letras de outros alfabetos nos
 nomes viram "?" no PDF (a planilha .xlsx mantém tudo). O app ficou maior (~640 KB de JavaScript) por causa das bibliotecas

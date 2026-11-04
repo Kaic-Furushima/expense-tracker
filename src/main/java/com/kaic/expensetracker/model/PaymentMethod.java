@@ -10,7 +10,7 @@ import lombok.Setter;
 @Table(name = "payment_methods")
 @Getter
 @Setter
-public class PaymentMethod {
+public class PaymentMethod extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

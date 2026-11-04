@@ -19,10 +19,10 @@ public interface RecurringPaymentRepository extends JpaRepository<RecurringPayme
     long countByAccount(Account account);
 
     @Modifying
-    @Query("update RecurringPayment r set r.category = null where r.category = :category")
+    @Query("update RecurringPayment r set r.category = null, r.updatedAt = current_timestamp where r.category = :category")
     void detachCategory(Category category);
 
     @Modifying
-    @Query("update RecurringPayment r set r.paymentMethod = null where r.paymentMethod = :method")
+    @Query("update RecurringPayment r set r.paymentMethod = null, r.updatedAt = current_timestamp where r.paymentMethod = :method")
     void detachPaymentMethod(PaymentMethod method);
 }

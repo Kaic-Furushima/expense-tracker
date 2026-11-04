@@ -207,5 +207,103 @@ create table app_settings (
 );
 `;
 
-export const MIGRATIONS = [V1];
+// --- Sincronizacao (ver src/sync/) ---
+// Tabelas que viajam entre os aparelhos, na ordem em que podem ser gravadas (quem e referenciado vem antes).
+export const SYNC_TABLES = ['categories', 'payment_methods', 'accounts', 'tags', 'expenses', 'budgets', 'transfers',
+    'recurring_payments', 'recurring_occurrences', 'pots', 'wish_items', 'pot_entries', 'expense_templates', 'attachments'];
+
+// "Agora" em milissegundos; sync_ctl.clock_ms (so os testes preenchem) tem prioridade sobre o relogio do SQLite.
+const NOW_MS = "coalesce((select clock_ms from sync_ctl), cast((julianday('now') - 2440587.5) * 86400000 as integer))";
+
+/**
+ * Gatilhos de uma tabela sincronizada. Nao usar "insert or replace" neles: quando o comando que os dispara (ex.: acao de
+ * chave estrangeira) tem outra politica de conflito, o SQLite ignora a do gatilho. "on conflict do update" nao tem esse problema.
+ */
+const IDLE = 'when (select applying from sync_ctl) = 0';
+const UPSERT = 'on conflict (table_name, uuid) do update set deleted = excluded.deleted, at = excluded.at';
+const mark = (table, uuid, deleted) =>
+    `insert into sync_outbox (table_name, uuid, deleted, at) values ('${table}', ${uuid}, ${deleted}, ${NOW_MS}) ${UPSERT};`;
+const triggersFor = t => [
+    `create trigger sync_ai_${t} after insert on ${t} ${IDLE} begin ${mark(t, 'new.uuid', 0)} end;`,
+    `create trigger sync_au_${t} after update on ${t} ${IDLE} begin ${mark(t, 'new.uuid', 0)} end;`,
+    `create trigger sync_ad_${t} after delete on ${t} ${IDLE} begin ${mark(t, 'old.uuid', 1)} end;`
+];
+
+/**
+ * Caixa de saida: qualquer inclusao, alteracao ou exclusao feita no aparelho anota a linha em sync_outbox (a menos que o
+ * proprio sync esteja gravando: sync_ctl.applying = 1). O motor so precisa enviar o que esta na caixa.
+ */
+function syncSchema() {
+    const lines = [`
+create table sync_ctl (applying integer not null default 0, clock_ms integer);
+insert into sync_ctl (applying, clock_ms) values (0, null);
+create table sync_state (key text primary key, value text not null);
+create table sync_outbox (
+    table_name text not null,
+    uuid text not null,
+    deleted integer not null default 0,
+    at integer not null,
+    primary key (table_name, uuid)
+);
+create table sync_alias (table_name text not null, from_uuid text not null, to_uuid text not null, primary key (table_name, from_uuid));
+create table sync_pending (table_name text not null, uuid text not null, change text not null, reason text, primary key (table_name, uuid));
+`];
+    const idle = IDLE;
+    for (const t of SYNC_TABLES) {
+        // linhas que ja existiam entram com at = 0: valem pelo proprio updated_at, nao por "agora"
+        lines.push(`insert or replace into sync_outbox (table_name, uuid, deleted, at) select '${t}', uuid, 0, 0 from ${t};`);
+        lines.push(...triggersFor(t));
+    }
+    // etiquetas de um lancamento: mexer nelas altera o lancamento
+    const parent = (ref, deleted) =>
+        `insert into sync_outbox (table_name, uuid, deleted, at) select 'expenses', uuid, ${deleted}, ${NOW_MS} from expenses where id = ${ref}.expense_id ${UPSERT};`;
+    lines.push(`create trigger sync_ai_expense_tags after insert on expense_tags ${idle} begin ${parent('new', 0)} end;`);
+    lines.push(`create trigger sync_ad_expense_tags after delete on expense_tags ${idle} begin ${parent('old', 0)} end;`);
+    return lines.join('\n');
+}
+
+/**
+ * Categorias de despesa e de receita separadas: "kind" (EXPENSE ou INCOME) e o nome passa a ser unico dentro de cada tipo.
+ * O SQLite nao apaga uma restricao "unique", entao a tabela e refeita (receita oficial: tabela nova, copia, troca de nome).
+ * Quem ja era usado por receitas ganha uma copia de receita e as receitas passam a apontar para ela.
+ */
+export const SPLIT_KINDS_SQL = `
+insert into categories (uuid, name, icon, color, kind, updated_at)
+select lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-a' || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+       c.name, c.icon, c.color, 'INCOME', strftime('%Y-%m-%dT%H:%M:%S.000', 'now', 'localtime')
+from categories c
+where c.kind = 'EXPENSE' and not exists (select 1 from categories i where i.kind = 'INCOME' and i.name = c.name) and (
+    exists (select 1 from expenses e where e.category_id = c.id and e.type = 'INCOME')
+    or exists (select 1 from recurring_payments r where r.category_id = c.id and r.type = 'INCOME')
+    or exists (select 1 from expense_templates t where t.category_id = c.id and t.type = 'INCOME'));
+update expenses set category_id = (select n.id from categories n join categories o on o.name = n.name and n.kind = 'INCOME' where o.id = expenses.category_id)
+where type = 'INCOME' and category_id is not null and exists (select 1 from categories o where o.id = expenses.category_id and o.kind = 'EXPENSE');
+update recurring_payments set category_id = (select n.id from categories n join categories o on o.name = n.name and n.kind = 'INCOME' where o.id = recurring_payments.category_id)
+where type = 'INCOME' and category_id is not null and exists (select 1 from categories o where o.id = recurring_payments.category_id and o.kind = 'EXPENSE');
+update expense_templates set category_id = (select n.id from categories n join categories o on o.name = n.name and n.kind = 'INCOME' where o.id = expense_templates.category_id)
+where type = 'INCOME' and category_id is not null and exists (select 1 from categories o where o.id = expense_templates.category_id and o.kind = 'EXPENSE');
+`;
+
+const V3 = `
+pragma foreign_keys = off;
+create table categories_new (
+    id integer primary key autoincrement,
+    uuid text not null unique,
+    name text not null collate nocase,
+    icon text,
+    color text,
+    parent_id integer references categories (id),
+    kind text not null default 'EXPENSE',
+    updated_at text not null,
+    unique (name, kind)
+);
+insert into categories_new (id, uuid, name, icon, color, parent_id, kind, updated_at)
+    select id, uuid, name, icon, color, parent_id, 'EXPENSE', updated_at from categories;
+drop table categories;
+alter table categories_new rename to categories;
+${triggersFor('categories').join('\n')}
+pragma foreign_keys = on;
+${SPLIT_KINDS_SQL}`;
+
+export const MIGRATIONS = [V1, syncSchema(), V3];
 export const SCHEMA_VERSION = MIGRATIONS.length;

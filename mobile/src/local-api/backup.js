@@ -1,6 +1,6 @@
 import {badRequest} from './http.js';
 import {parseH2Script} from './h2script.js';
-import {SCHEMA_VERSION} from './schema.js';
+import {SCHEMA_VERSION, SPLIT_KINDS_SQL} from './schema.js';
 
 const APP = 'expense-tracker';
 const NOT_A_BACKUP = 'Este arquivo não parece um backup deste aplicativo.';
@@ -15,54 +15,54 @@ export const TABLES = ['categories', 'payment_methods', 'accounts', 'expenses', 
  * [origem, tipo] com tipo cents (decimal -> centavos), bool (0/1) ou ts (data e hora no formato do app).
  */
 const FROM_H2 = {
-    categories: {id: 'id', name: 'name', icon: 'icon', color: 'color', parent_id: 'parent_id'},
-    payment_methods: {id: 'id', name: 'name'},
+    categories: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', icon: 'icon', color: 'color', parent_id: 'parent_id', kind: 'kind'},
+    payment_methods: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     accounts: {
-        id: 'id', name: 'name', type: 'type', color: 'color', icon: 'icon', initial_cents: ['initial_balance', 'cents'],
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', type: 'type', color: 'color', icon: 'icon', initial_cents: ['initial_balance', 'cents'],
         archived: ['archived', 'bool'], parent_id: 'parent_id', closing_day: 'closing_day', due_day: 'due_day'
     },
     expenses: {
-        id: 'id', name: 'name', description: 'description', amount_cents: ['amount', 'cents'], date: 'date', type: 'type',
+        id: 'id', uuid: 'uuid', name: 'name', description: 'description', amount_cents: ['amount', 'cents'], date: 'date', type: 'type',
         status: 'status', category_id: 'category_id', account_id: 'account_id', payment_method_id: 'payment_method_id',
         installment_group: 'installment_group', installment_number: 'installment_number', installment_total: 'installment_total',
         created_at: ['created_at', 'ts'], updated_at: ['updated_at', 'ts'], deleted_at: ['deleted_at', 'ts']
     },
-    tags: {id: 'id', name: 'name'},
+    tags: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     expense_tags: {expense_id: 'expense_id', tag_id: 'tag_id'},
-    budgets: {id: 'id', category_id: 'category_id', from_month: 'from_month', amount_cents: ['amount', 'cents']},
+    budgets: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], category_id: 'category_id', from_month: 'from_month', amount_cents: ['amount', 'cents']},
     transfers: {
-        id: 'id', from_account_id: 'from_account_id', to_account_id: 'to_account_id', amount_cents: ['amount', 'cents'],
+        id: 'id', uuid: 'uuid', from_account_id: 'from_account_id', to_account_id: 'to_account_id', amount_cents: ['amount', 'cents'],
         date: 'date', description: 'description', invoice_month: 'invoice_month', created_at: ['created_at', 'ts'],
         updated_at: ['updated_at', 'ts'], deleted_at: ['deleted_at', 'ts']
     },
     recurring_payments: {
-        id: 'id', name: 'name', type: 'type', amount_cents: ['amount', 'cents'], variable_amount: ['variable_amount', 'bool'],
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', type: 'type', amount_cents: ['amount', 'cents'], variable_amount: ['variable_amount', 'bool'],
         day_of_month: 'day_of_month', account_id: 'account_id', payment_method_id: 'payment_method_id', category_id: 'category_id',
         active: ['active', 'bool'], start_month: 'start_month', end_month: 'end_month'
     },
     recurring_occurrences: {
-        id: 'id', recurring_id: 'recurring_id', occurrence_month: 'occurrence_month', due_date: 'due_date', status: 'status',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], recurring_id: 'recurring_id', occurrence_month: 'occurrence_month', due_date: 'due_date', status: 'status',
         paid_date: 'paid_date', amount_cents: ['amount', 'cents'], expense_id: 'expense_id'
     },
     pots: {
-        id: 'id', name: 'name', color: 'color', icon: 'icon', goal_cents: ['goal', 'cents'], mode: 'mode',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', color: 'color', icon: 'icon', goal_cents: ['goal', 'cents'], mode: 'mode',
         monthly_cents: ['monthly_amount', 'cents'], start_month: 'start_month', active: ['active', 'bool']
     },
     wish_items: {
-        id: 'id', name: 'name', estimated_cents: ['estimated_price', 'cents'], notes: 'notes', url: 'url', status: 'status',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', estimated_cents: ['estimated_price', 'cents'], notes: 'notes', url: 'url', status: 'status',
         pot_id: 'pot_id', real_cents: ['real_price', 'cents'], purchase_date: 'purchase_date', expense_id: 'expense_id',
         created_at: ['created_at', 'ts']
     },
     pot_entries: {
-        id: 'id', pot_id: 'pot_id', entry_date: 'entry_date', amount_cents: ['amount', 'cents'], kind: 'kind', note: 'note',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], pot_id: 'pot_id', entry_date: 'entry_date', amount_cents: ['amount', 'cents'], kind: 'kind', note: 'note',
         auto_month: 'auto_month', wish_item_id: 'wish_item_id'
     },
     expense_templates: {
-        id: 'id', name: 'name', type: 'type', amount_cents: ['amount', 'cents'], category_id: 'category_id', account_id: 'account_id',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', type: 'type', amount_cents: ['amount', 'cents'], category_id: 'category_id', account_id: 'account_id',
         payment_method_id: 'payment_method_id', description: 'description', tags: 'tags', created_at: ['created_at', 'ts']
     },
     attachments: {
-        id: 'id', expense_id: 'expense_id', file_name: 'file_name', content_type: 'content_type', size_bytes: 'size_bytes',
+        id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], expense_id: 'expense_id', file_name: 'file_name', content_type: 'content_type', size_bytes: 'size_bytes',
         data: 'data', created_at: ['created_at', 'ts']
     },
     app_settings: {setting_key: 'setting_key', setting_value: 'setting_value'}
@@ -106,6 +106,8 @@ export class Backup {
             for (const table of [...TABLES].reverse()) this.db.run(`delete from ${table}`);
             this.db.run('delete from sqlite_sequence');
             for (const table of TABLES) this.insertAll(table, tables[table] ?? []);
+            // backup de antes das categorias separadas por tipo: as receitas ganham as suas categorias
+            if (!(tables.categories ?? []).some(c => c.kind)) this.db.sql.run(SPLIT_KINDS_SQL);
             if (this.db.all('pragma foreign_key_check').length) throw badRequest('O backup tem registros que apontam para dados que não existem.');
             if (!this.db.value('select count(*) from accounts')) throw badRequest('O backup não tem nenhuma conta.');
         });
@@ -149,7 +151,8 @@ export class Backup {
         if (!parsed.has('expenses') || !parsed.has('accounts')) throw badRequest(NOT_A_BACKUP);
         // colunas que so existem aqui: o backup antigo nao tem
         for (const e of out.expenses) { e.type ??= 'EXPENSE'; e.status ??= 'PAID'; }
-        for (const w of out.wish_items) w.updated_at = w.created_at;
+        for (const c of out.categories) c.kind ??= 'EXPENSE';
+        for (const w of out.wish_items) w.updated_at ??= w.created_at;
         return out;
     }
 

@@ -56,11 +56,11 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long>, JpaSpec
     long countAllByAccountId(Long accountId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update expenses set category_id = null where category_id = :categoryId", nativeQuery = true)
+    @Query(value = "update expenses set category_id = null, updated_at = current_timestamp where category_id = :categoryId", nativeQuery = true)
     void detachCategory(Long categoryId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update expenses set payment_method_id = null where payment_method_id = :methodId", nativeQuery = true)
+    @Query(value = "update expenses set payment_method_id = null, updated_at = current_timestamp where payment_method_id = :methodId", nativeQuery = true)
     void detachPaymentMethod(Long methodId);
 
     /* ---- trash ---- */
@@ -72,11 +72,11 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long>, JpaSpec
     Optional<Expense> findTrashedById(Long id);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update expenses set deleted_at = null where id = :id and deleted_at is not null", nativeQuery = true)
+    @Query(value = "update expenses set deleted_at = null, updated_at = current_timestamp where id = :id and deleted_at is not null", nativeQuery = true)
     void restore(Long id);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update expenses set deleted_at = :at where deleted_at is null", nativeQuery = true)
+    @Query(value = "update expenses set deleted_at = :at, updated_at = current_timestamp where deleted_at is null", nativeQuery = true)
     void trashAll(LocalDateTime at);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)

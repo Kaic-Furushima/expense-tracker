@@ -58,10 +58,10 @@ export class Demo {
         return found ? this.catalog.accountWithBalance(found.id) : this.catalog.createAccount({name, type, color});
     }
 
-    category(name) {
-        const found = this.db.get('select id from categories where name = ?', [name]);
+    category(name, kind = 'EXPENSE') {
+        const found = this.db.get('select id from categories where name = ? and kind = ?', [name, kind]);
         if (found) return found.id;
-        return this.catalog.createCategory({name, color: PALETTE[((javaHash(name) % PALETTE.length) + PALETTE.length) % PALETTE.length]}).id;
+        return this.catalog.createCategory({name, kind, color: PALETTE[((javaHash(name) % PALETTE.length) + PALETTE.length) % PALETTE.length]}).id;
     }
 
     method(name) {
@@ -77,7 +77,7 @@ export class Demo {
         const cents = toCents(amount);
         if (this.db.get('select 1 from expenses where deleted_at is null and name = ? and type = ? and date = ? and amount_cents = ?', [name, type, date, cents])) return;
         this.expenses.insert({
-            name, description: null, amountCents: cents, date, type, status, categoryId: this.category(category), accountId: account.id,
+            name, description: null, amountCents: cents, date, type, status, categoryId: this.category(category, type), accountId: account.id,
             paymentMethodId: paymentMethod == null ? null : this.method(paymentMethod), tagIds: []
         });
     }

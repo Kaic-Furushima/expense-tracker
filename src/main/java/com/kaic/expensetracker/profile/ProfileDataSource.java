@@ -55,15 +55,6 @@ public class ProfileDataSource extends AbstractDataSource {
         return ProfileContext.MAIN.equals(id) ? root : root.resolve("profiles").resolve(id);
     }
 
-    /** Only the built-in H2 database can hold several profiles. */
-    public boolean supportsProfiles() {
-        try (Connection c = main.getConnection()) {
-            return c.getMetaData().getDatabaseProductName().toLowerCase().contains("h2");
-        } catch (SQLException e) {
-            return false;
-        }
-    }
-
     private HikariDataSource open(String id) {
         try {
             Files.createDirectories(folderOf(id));

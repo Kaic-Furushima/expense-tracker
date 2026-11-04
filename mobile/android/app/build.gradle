@@ -16,6 +16,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // offline: sem permissão de internet, dados só no aparelho. sync: com internet e sincronização com o computador.
+    // O sufixo no id permite instalar as duas no mesmo celular (cada uma com os seus dados).
+    flavorDimensions = ["conexao"]
+    productFlavors {
+        offline {
+            dimension = "conexao"
+        }
+        sync {
+            dimension = "conexao"
+            applicationIdSuffix = ".sync"
+            versionNameSuffix = "-sync"
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false

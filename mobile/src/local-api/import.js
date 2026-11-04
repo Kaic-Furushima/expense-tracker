@@ -282,15 +282,16 @@ function most(counts) {
 /** Sugere a categoria pelo que a pessoa ja fez (mesma descricao, depois mesma primeira palavra) e, por fim, por lojas e palavras conhecidas. */
 class CategorySuggester {
     constructor(history, categories) {
+        this.kinds = new Map(categories.map(c => [c.id, c.kind]));
         this.byName = new Map();
         this.byFirstWord = new Map();
-        this.byNormalizedName = new Map(categories.map(c => [normalize(c.name), c.id]));
+        this.byNormalizedName = new Map(categories.map(c => [`${c.kind}:${normalize(c.name)}`, c.id]));
         const bump = (map, key, id) => {
             if (!map.has(key)) map.set(key, new Map());
             map.get(key).set(id, (map.get(key).get(id) ?? 0) + 1);
         };
         for (const e of history) {
-            if (e.category_id == null) continue;
+            if (e.category_id == null || this.kinds.get(e.category_id) !== e.type) continue;
             const key = simplify(e.name);
             if (!key) continue;
             bump(this.byName, key, e.category_id);
@@ -305,7 +306,7 @@ class CategorySuggester {
         const known = most(this.byName.get(key)) ?? most(this.byFirstWord.get(firstWord(key)));
         if (known != null) return known;
         for (const [categoryName, words] of KEYWORDS) {
-            const category = this.byNormalizedName.get(categoryName);
+            const category = this.byNormalizedName.get(`${type === 'INCOME' ? 'INCOME' : 'EXPENSE'}:${categoryName}`);
             if (category == null || (type === 'INCOME') !== (categoryName === 'salario')) continue;
             if (words.some(w => new RegExp(`\\b${escapeRegex(w)}`).test(key))) return category;
         }
@@ -358,11 +359,11 @@ export class Importer {
     }
 
     suggest(rows) {
-        const categories = this.db.all('select id, name from categories');
-        const suggester = new CategorySuggester(this.db.all('select name, category_id from expenses where deleted_at is null'), categories);
+        const categories = this.db.all('select id, name, kind from categories');
+        const suggester = new CategorySuggester(this.db.all('select name, category_id, type from expenses where deleted_at is null'), categories);
         return rows.map(r => {
             if (r.kind === 'TRANSFER') return r;
-            const existing = r.categoryName == null ? null : categories.find(c => c.name.toLowerCase() === r.categoryName.toLowerCase());
+            const existing = r.categoryName == null ? null : categories.find(c => c.kind === (r.type === 'INCOME' ? 'INCOME' : 'EXPENSE') && c.name.toLowerCase() === r.categoryName.toLowerCase());
             if (existing) return {...r, categoryId: existing.id, categoryName: existing.name};
             if (r.categoryName && r.categoryName.trim()) return r; // o CSV do app cita uma categoria que ainda nao existe: sera criada
             return {...r, categoryId: suggester.suggest(r.name, r.type)};
@@ -439,11 +440,9 @@ export class Importer {
         if (r.categoryId != null) {
             categoryId = this.catalog.category(r.categoryId).id;
         } else if (r.categoryName && r.categoryName.trim()) {
-            const key = r.categoryName.toLowerCase();
-            if (!created.has(key)) {
-                const found = this.db.get('select id from categories where name = ?', [r.categoryName.trim()]);
-                created.set(key, found ? found.id : this.catalog.createCategory({name: r.categoryName}).id);
-            }
+            const kind = r.type === 'INCOME' ? 'INCOME' : 'EXPENSE';
+            const key = `${kind}:${r.categoryName.toLowerCase()}`;
+            if (!created.has(key)) created.set(key, this.catalog.findOrCreateCategory(r.categoryName, kind).id);
             categoryId = created.get(key);
         }
         let methodId = null;

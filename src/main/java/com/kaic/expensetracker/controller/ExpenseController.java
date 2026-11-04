@@ -172,10 +172,18 @@ public class ExpenseController {
     public ResponseEntity<ExpenseResponse> create(@Valid @RequestBody ExpenseRequest request) {
         Expense expense = new Expense();
         apply(expense, request);
+        List<ExpenseService.Slot> plan = request.installmentPlan() == null ? List.of()
+                : request.installmentPlan().stream()
+                        .map(s -> new ExpenseService.Slot(s.date(), s.status(), s.amount())).toList();
         int installments = request.installments() == null ? 1 : request.installments();
-        Expense saved = installments > 1 && expense.getType() == TransactionType.EXPENSE
-                ? expenseService.saveInstallments(expense, installments).get(0)
-                : expenseService.save(expense);
+        Expense saved;
+        if (plan.size() > 1 && expense.getType() == TransactionType.EXPENSE) {
+            saved = expenseService.saveInstallments(expense, plan).get(0);
+        } else if (installments > 1 && expense.getType() == TransactionType.EXPENSE) {
+            saved = expenseService.saveInstallments(expense, installments).get(0);
+        } else {
+            saved = expenseService.save(expense);
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(ExpenseResponse.fromEntity(saved));
     }
 
@@ -217,6 +225,8 @@ public class ExpenseController {
         // Every transaction belongs to an account; when the client does not say which, the main account is used.
         Account account = request.accountId() == null ? accountService.defaultAccount() : accountService.getOrThrow(request.accountId());
         PaymentMethod method = request.paymentMethodId() == null ? null : paymentMethodService.getOrThrow(request.paymentMethodId());
+        TransactionType kind = request.type() == null ? TransactionType.EXPENSE : request.type();
+        categoryService.requireKind(category, kind);
         expense.setName(request.name().trim());
         expense.setDescription(request.description());
         expense.setAmount(request.amount().setScale(2, RoundingMode.HALF_UP));
@@ -251,25 +261,39 @@ public class ExpenseController {
             ExpenseStatus status,
             List<String> tags,
             @Min(value = 1, message = "O número de parcelas deve ser de pelo menos 1.")
-            @Max(value = 60, message = "O número de parcelas pode ser de até 60.") Integer installments
+            @Max(value = 60, message = "O número de parcelas pode ser de até 60.") Integer installments,
+            @Size(max = 60, message = "O número de parcelas pode ser de até 60.") List<InstallmentSlot> installmentPlan
     ) {
+        /** Same as the full constructor, with only a count of installments (monthly, same day). */
+        public ExpenseRequest(String name, String description, BigDecimal amount, LocalDate date, TransactionType type,
+                              Long categoryId, Long accountId, Long paymentMethodId, ExpenseStatus status,
+                              List<String> tags, Integer installments) {
+            this(name, description, amount, date, type, categoryId, accountId, paymentMethodId, status, tags,
+                    installments, null);
+        }
+
         /** Same as the full constructor, for a single (not installment) transaction. */
         public ExpenseRequest(String name, String description, BigDecimal amount, LocalDate date, TransactionType type,
                               Long categoryId, Long accountId, Long paymentMethodId, ExpenseStatus status,
                               List<String> tags) {
-            this(name, description, amount, date, type, categoryId, accountId, paymentMethodId, status, tags, null);
+            this(name, description, amount, date, type, categoryId, accountId, paymentMethodId, status, tags, null, null);
         }
 
         /** Shortcut for a plain paid expense in the main account, without category, payment method or tags. */
         public ExpenseRequest(String name, String description, BigDecimal amount, LocalDate date) {
-            this(name, description, amount, date, null, null, null, null, null, null, null);
+            this(name, description, amount, date, null, null, null, null, null, null, null, null);
         }
 
         /** Same, with the fields most tests care about. */
         public ExpenseRequest(String name, String description, BigDecimal amount, LocalDate date,
                               TransactionType type, Long categoryId, Long accountId, Long paymentMethodId) {
-            this(name, description, amount, date, type, categoryId, accountId, paymentMethodId, null, null, null);
+            this(name, description, amount, date, type, categoryId, accountId, paymentMethodId, null, null, null, null);
         }
+    }
+
+    /** One installment of a custom plan: its due date, whether it is already paid and, optionally, its own amount. */
+    public record InstallmentSlot(@NotNull(message = "Informe a data de cada parcela.") LocalDate date,
+                                  ExpenseStatus status, BigDecimal amount) {
     }
 
     public record ExpenseResponse(

@@ -144,8 +144,9 @@ public class ImportService {
                 result.add(row);
                 continue;
             }
+            TransactionType wanted = row.type() == null ? TransactionType.EXPENSE : row.type();
             Category existing = row.categoryName() == null ? null : categories.stream()
-                    .filter(c -> c.getName().equalsIgnoreCase(row.categoryName())).findFirst().orElse(null);
+                    .filter(c -> c.getKind() == wanted && c.getName().equalsIgnoreCase(row.categoryName())).findFirst().orElse(null);
             if (existing != null) {
                 result.add(row.withCategory(existing.getId(), existing.getName()));
             } else if (row.categoryName() != null && !row.categoryName().isBlank()) {
@@ -247,8 +248,8 @@ public class ImportService {
         if (row.categoryId() != null) {
             category = categoryService.getOrThrow(row.categoryId());
         } else if (row.categoryName() != null && !row.categoryName().isBlank()) {
-            category = created.computeIfAbsent(row.categoryName().toLowerCase(Locale.ROOT),
-                    k -> categoryService.findOrCreate(row.categoryName(), null, null));
+            category = created.computeIfAbsent(row.type() + ":" + row.categoryName().toLowerCase(Locale.ROOT),
+                    k -> categoryService.findOrCreate(row.categoryName(), null, null, row.type()));
         }
         PaymentMethod method = null;
         if (row.methodName() != null && !row.methodName().isBlank()) {
@@ -621,11 +622,15 @@ public class ImportService {
         private final Map<String, Map<Long, Integer>> byName = new HashMap<>();
         private final Map<String, Map<Long, Integer>> byFirstWord = new HashMap<>();
         private final Map<String, Long> categoriesByNormalizedName = new HashMap<>();
+        private final Map<Long, TransactionType> kinds = new HashMap<>();
 
         CategorySuggester(List<Expense> history, List<Category> categories) {
-            categories.forEach(c -> categoriesByNormalizedName.put(normalize(c.getName()), c.getId()));
+            for (Category c : categories) {
+                kinds.put(c.getId(), c.getKind());
+                categoriesByNormalizedName.put(c.getKind() + ":" + normalize(c.getName()), c.getId());
+            }
             for (Expense e : history) {
-                if (e.getCategory() == null) {
+                if (e.getCategory() == null || e.getCategory().getKind() != e.getType()) {
                     continue;
                 }
                 String key = simplify(e.getName());
@@ -645,15 +650,16 @@ public class ImportService {
             if (key.isEmpty()) {
                 return null;
             }
+            TransactionType wanted = type == null ? TransactionType.EXPENSE : type;
             Long best = most(byName.get(key));
             if (best == null) {
                 best = most(byFirstWord.get(firstWord(key)));
             }
-            if (best != null) {
+            if (best != null && kinds.get(best) == wanted) {
                 return best;
             }
             for (Map.Entry<String, List<String>> entry : KEYWORDS.entrySet()) {
-                Long category = categoriesByNormalizedName.get(entry.getKey());
+                Long category = categoriesByNormalizedName.get(wanted + ":" + entry.getKey());
                 if (category == null || (type == TransactionType.INCOME) != entry.getKey().equals("salario")) {
                     continue;
                 }

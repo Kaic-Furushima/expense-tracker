@@ -9,6 +9,7 @@
     const CHEVRON = '<svg class="i pick-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
     const plain = text => String(text).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const esc = text => String(text).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    const CREATE_LABELS = {account: 'Nova conta', method: 'Nova forma de pagamento'};
     let open = null; // {root, select, opener}
 
     const buttonOf = select => select.nextElementSibling && select.nextElementSibling.classList.contains('pick') ? select.nextElementSibling : null;
@@ -81,6 +82,7 @@
             <div class="pick-list" role="listbox">${options.map((o, i) => `<button type="button" class="pick-item${o.selected ? ' on' : ''}" role="option"
                 aria-selected="${o.selected}" data-i="${i}"${o.disabled ? ' disabled' : ''}><span>${esc(o.textContent.trim() || ' ')}</span>${o.selected ? ico('check') : ''}</button>`).join('')}</div>
             <p class="pick-none small muted" hidden>Nada encontrado</p>
+            ${select.dataset.create && window.quickCreateFor ? `<button type="button" class="pick-create">${ico('plus')}<span>${esc(CREATE_LABELS[select.dataset.create] || 'Novo')}</span></button>` : ''}
         </div>`;
         document.body.appendChild(root);
         open = {root, select, opener};
@@ -92,6 +94,8 @@
             const item = e.target.closest('.pick-item');
             if (item) choose(select, options[Number(item.dataset.i)].value);
         });
+        const create = root.querySelector('.pick-create');
+        if (create) create.addEventListener('click', () => { closePicker(false); window.quickCreateFor(select); });
         if (search) {
             search.addEventListener('input', () => {
                 const term = plain(search.value.trim());

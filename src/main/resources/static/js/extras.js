@@ -144,7 +144,7 @@ function runBatch(kind) {
         <p class="small muted sheet-sub">Vale para os ${n} lançamentos selecionados.</p>
         <form id="batch-form" novalidate>
             ${kind === 'category' ? `<div class="field"><label for="b-value">Nova categoria</label><select id="b-value"><option value="">Sem categoria</option>${orderedCategories().map(c =>
-                `<option value="${c.id}">${esc(catLabel(c))}</option>`).join('')}</select></div>` : ''}
+                `<option value="${c.id}">${esc(catOptionLabel(c))}</option>`).join('')}</select></div>` : ''}
             ${kind === 'account' ? `<div class="field"><label for="b-value">Nova conta</label><select id="b-value">${accountOptions(defaultAccountId())}</select></div>` : ''}
             ${kind === 'tag' ? '<div class="field"><label for="b-value">Tag</label><input id="b-value" maxlength="40" placeholder="#reembolso" autocomplete="off"></div>' : ''}
             <div class="form-actions"><button type="button" class="btn" id="b-cancel">Cancelar</button><button type="submit" class="btn primary">Aplicar</button></div>
@@ -325,7 +325,7 @@ async function saveAsTemplate(body) {
 
 function renderTemplatesPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Modelos favoritos')}
-        <p class="small muted">Lançamentos que você repete. Ao criar um lançamento, toque num modelo para preencher tudo de uma vez. Para criar um, preencha um lançamento e use <strong>Salvar como modelo</strong>.</p>
+        ${tip('templates', `Lançamentos que você repete. Ao criar um lançamento, toque num modelo para preencher tudo de uma vez. Para criar um, preencha um lançamento e use <strong>Salvar como modelo</strong>.`)}
         <div class="list">${state.templates.length ? state.templates.map(t => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('star')}</span>
             <span class="grow"><span class="title">${esc(t.name)}</span><span class="small muted">${t.type === 'INCOME' ? 'Receita' : 'Despesa'}${t.amount != null ? ' · ' + money(t.amount) : ''}${t.categoryName ? ' · ' + esc(t.categoryName) : ''}${t.accountName ? ' · ' + esc(t.accountName) : ''}</span></span>
             <button class="btn danger" data-del="${t.id}">Excluir</button></div>`).join('')
@@ -445,7 +445,7 @@ function openRemindersSheet() {
             <span class="avatar" style="background:var(--surface-2)">${ico(r.kind === 'BUDGET' ? 'target' : r.kind === 'MONTH_END' ? 'clock' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(r.title)}</span><span class="small muted">${esc(r.detail)}</span></span></div>`).join('')}</div>`
             : '<div class="card empty"><div class="big">' + ico('check') + '</div>Nada pedindo atenção agora.</div>'}
-        <p class="small muted" style="margin-top:12px">O app avisa de contas vencidas ou que vencem nos próximos ${state.settings.reminderDays} dias, de orçamentos a partir de 80% e do fim do mês. ${window.desktop ? 'Com o app aberto, os avisos também aparecem como notificações do Windows.' : ''} Ajuste em Mais → Configurações.</p>
+        ${tip('reminders', `O app avisa de contas vencidas ou que vencem nos próximos ${state.settings.reminderDays} dias, de orçamentos a partir de 80% e do fim do mês. Ajuste em Mais → Configurações.`)}
         ${canNotify && Notification.permission === 'default' ? '<button class="btn block" id="allow-notify">Ativar notificações do navegador</button>' : ''}
         ${canNotify && Notification.permission === 'denied' ? '<p class="small muted">As notificações estão bloqueadas neste navegador. Libere nas configurações do site.</p>' : ''}
         <div id="native-notify"></div>
@@ -462,7 +462,7 @@ async function paintNativeNotify(sheet) {
     let status = 'denied';
     try { status = await window.nativeNotifications.status(); } catch (e) { /* treated as off */ }
     if (status === 'granted') {
-        box.innerHTML = '<p class="small muted">Notificações ativadas: o celular avisa das contas e do fim do mês às 9h, mesmo com o app fechado.</p>';
+        box.innerHTML = '';
         return;
     }
     box.innerHTML = '<button class="btn block" id="allow-native">Ativar notificações</button>';

@@ -57,7 +57,7 @@ function dateField(id, iso, label = 'Data') {
     return `<div class="field"><label for="${id}">${label}</label>
         <div class="date-row"><input id="${id}" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" value="${esc(isoToBr(iso))}">
             <button type="button" class="icon-btn small date-cal" data-cal="${id}" aria-label="Abrir calendário">${ico('calendar')}</button></div>
-        <span class="date-quick" data-for="${id}"><button type="button" data-days="0">Hoje</button><button type="button" data-days="-1">Ontem</button></span></div>`;
+        <span class="date-quick" data-for="${id}"><button type="button" data-days="-1">Ontem</button><button type="button" data-days="0">Hoje</button><button type="button" data-days="1">Amanhã</button><button type="button" data-days="7">Semana que vem</button><button type="button" data-months="1">Mês que vem</button></span></div>`;
 }
 /** Wires the field created by dateField() and returns a function that reads it as yyyy-mm-dd ('' if invalid). */
 function bindDate(sheet, id) {
@@ -67,7 +67,8 @@ function bindDate(sheet, id) {
         input.value = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
     });
     $$(`.date-quick[data-for="${id}"] button`, sheet).forEach(b => b.onclick = () => {
-        input.value = isoToBr(shiftIso(todayIso(), Number(b.dataset.days)));
+        input.value = isoToBr(b.dataset.months ? addMonthsIso(todayIso(), Number(b.dataset.months)) : shiftIso(todayIso(), Number(b.dataset.days)));
+        input.dispatchEvent(new Event('input')); // lets whoever depends on the date (the installment plan) react
     });
     const calendarButton = $(`[data-cal="${id}"]`, sheet);
     if (calendarButton) calendarButton.onclick = () => openCalendar(input);
@@ -81,11 +82,13 @@ function openCalendar(input) {
     let shown = (brToIso(input.value) || today).slice(0, 7);
     const weekdays = Array.from({length: 7}, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(LOCALE, {weekday: 'short'}).replace('.', ''));
     const close = () => {
+        layerClose('confirm');
         root.innerHTML = '';
         document.removeEventListener('keydown', onKey, true);
         input.focus();
     };
     const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    layerOpen('confirm', close);
     const paint = () => {
         const [y, m] = shown.split('-').map(Number);
         const selected = brToIso(input.value);
@@ -182,7 +185,9 @@ function openAccountPicker() {
                 <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null ? check : ''}</button>
             ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}">${avatar(a.icon || 'bank', a.color)}
                 <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${esc(ACCOUNT_TYPES[a.type])} · ${money(a.balance)}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
+            <button class="row" id="acc-new"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button>
         </div>`);
+    $('#acc-new', sheet).onclick = () => { closeSheet(); openAccountSheet(null); };
     $$('[data-acc]', sheet).forEach(b => b.onclick = () => {
         state.accountFilter = nextId(b.dataset.acc);
         safeStorage.set('account', b.dataset.acc);
@@ -235,12 +240,12 @@ function openOccurrenceSheet(o) {
         <h2>${esc(o.name)}</h2>
         <p class="small muted sheet-sub">${statusLabel(o)} · ${esc(o.accountName)}${o.paymentMethodName ? ' · ' + esc(o.paymentMethodName) : ''}</p>
         ${paid ? `<div class="notice">${ico('check')} Pago em ${isoToBr(o.paidDate)} — ${money(o.amount)}</div>
-            <p class="small muted">Para desfazer, exclua o lançamento em Lançamentos: o pagamento volta a ficar pulado e pode ser reaberto.</p>`
+            ${tip('occ-undo', `Para desfazer, exclua o lançamento em Lançamentos: o pagamento volta a ficar pulado e pode ser reaberto.`)}`
         : `<form id="occ-form" novalidate>
             <input class="amount-input" id="o-amount" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(o.amount)}" aria-label="Valor">
             ${o.variableAmount ? '<p class="small muted center">Valor variável: informe quanto veio neste mês.</p>' : ''}
             ${dateField('o-date', todayIso(), o.type === 'INCOME' ? 'Data do recebimento' : 'Data do pagamento')}
-            <p class="small muted">Pode ser antes do vencimento — por exemplo, pagar no dia 28 o que vence no dia 30.</p>
+            ${tip('occ-early', `Pode ser antes do vencimento — por exemplo, pagar no dia 28 o que vence no dia 30.`)}
             <div class="grid2">
                 <div class="field"><label for="o-account">Conta</label><select id="o-account">${accountOptions(o.accountId)}</select></div>
                 <div class="field"><label for="o-method">Forma de pagamento</label><select id="o-method">${options(state.methods, o.paymentMethodId, {none: '—'})}</select></div>
@@ -272,7 +277,7 @@ function openOccurrenceSheet(o) {
 /* ---------- More: menu and sub pages ---------- */
 function renderMore() {
     const pages = {accounts: renderAccountsPage, methods: renderMethodsPage, recurring: renderRecurringPage,
-        categories: renderCategoriesPage, trash: renderTrashPage, backup: renderBackupPage, import: renderImportPage, templates: renderTemplatesPage, profiles: renderProfilesPage};
+        categories: renderCategoriesPage, trash: renderTrashPage, backup: renderBackupPage, sync: renderSyncPage, import: renderImportPage, templates: renderTemplatesPage, profiles: renderProfilesPage};
     const page = pages[state.sub];
     if (page) page(); else renderMoreMenu();
 }
@@ -391,30 +396,30 @@ function renderMoreMenu() {
         <div class="card stack-tight">
             <label class="switch-row"><input type="checkbox" id="auto-pay" ${state.settings.autoPayRecurring ? 'checked' : ''}>
                 <span><strong>Descontar pagamentos recorrentes automaticamente</strong>
-                <span class="small muted" style="display:block">Ligado: no dia do vencimento o lançamento é criado sozinho. Desligado: eles ficam em “A pagar” até você confirmar. Pagamentos de valor variável sempre pedem confirmação.</span></span></label>
+                ${info(`Ligado: no dia do vencimento o lançamento é criado sozinho. Desligado: eles ficam em “A pagar” até você confirmar. Pagamentos de valor variável sempre pedem confirmação.`)}</span></label>
             <label class="switch-row"><input type="checkbox" id="rollover" ${state.settings.budgetRollover ? 'checked' : ''}>
                 <span><strong>Levar a sobra do orçamento para o mês seguinte</strong>
-                <span class="small muted" style="display:block">O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}</span></span></label>
+                ${info(`O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}`)}</span></label>
             <div class="field" style="margin:0"><label for="currency">Moeda</label>
                 <select id="currency">${Object.entries(CURRENCY_NAMES).map(([code, name]) =>
-                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
-                <span class="small muted">Só muda o símbolo e o formato: os valores não são convertidos.</span></div>
+                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div>
             <div class="field" style="margin:0"><label for="language">Idioma</label>
                 <select id="language">${[['pt', 'Português'], ['en', 'English'], ['es', 'Español']].map(([code, name]) =>
-                    `<option value="${code}" ${LANG === code ? 'selected' : ''}>${name}</option>`).join('')}</select>
-                <span class="small muted">Vale para o app inteiro, em todos os aparelhos. Os nomes que você criou (categorias, contas…) não são traduzidos.</span></div>
+                    `<option value="${code}" ${LANG === code ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
             <label class="switch-row"><input type="checkbox" id="reminders" ${state.settings.remindersEnabled ? 'checked' : ''}>
                 <span><strong>Lembretes</strong>
-                <span class="small muted" style="display:block">${window.nativeNotifications
+                ${info(`${window.nativeNotifications
                     ? 'Avisa (no sino do topo e em notificações do celular) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. As contas e o fim do mês também avisam às 9h, mesmo com o app fechado.'
-                    : `Avisa (no sino do topo${window.desktop ? ' e em notificações do Windows' : ' e, se você permitir, em notificações do navegador'}) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. Só funciona com o app aberto.`}</span></span></label>
+                    : `Avisa (no sino do topo${window.desktop ? ' e em notificações do Windows' : ' e, se você permitir, em notificações do navegador'}) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. Só funciona com o app aberto.`}`)}</span></label>
             <div class="field" style="margin:0"><label for="reminder-days">Avisar contas com antecedência de</label>
                 <select id="reminder-days" ${state.settings.remindersEnabled ? '' : 'disabled'}>${[1, 2, 3, 5, 7, 10, 15].map(n =>
                     `<option value="${n}" ${state.settings.reminderDays === n ? 'selected' : ''}>${n === 1 ? '1 dia' : n + ' dias'}</option>`).join('')}</select></div>
             <label class="switch-row"><input type="checkbox" id="auto-backup" ${state.settings.autoBackup ? 'checked' : ''}>
                 <span><strong>Backup automático todo dia</strong>
-                <span class="small muted" style="display:block">Guarda uma cópia de tudo na pasta de dados, no máximo uma por dia, enquanto o app estiver aberto. Ficam as 7 mais recentes, em Backup e restauração.</span></span></label>
-            ${state.settings.autoBackup ? '' : '<p class="small" style="color:var(--warn);margin:0">Sem backup automático, um erro ou um arquivo apagado por engano pode levar seus dados sem volta. Você pode deixar desligado e ignorar este aviso.</p>'}
+                ${info(`Guarda uma cópia de tudo na pasta de dados, no máximo uma por dia, enquanto o app estiver aberto. Ficam as 7 mais recentes, em Backup e restauração.`)}</span></label>
+            ${state.settings.autoBackup ? '' : tip('no-backup', 'Sem backup automático, um erro ou um arquivo apagado por engano pode levar seus dados sem volta.')}
+            <label class="switch-row"><input type="checkbox" id="tips" ${tipsOn() ? 'checked' : ''}>
+                <span><strong>Mostrar dicas</strong>${info('Explicações curtas pelas telas. Cada dica aparece uma vez, com o botão “Entendi” para não voltar. Vale só neste aparelho.')}</span></label>
         </div>
         ${securityCard()}
         <h2 class="section-title">Aparência</h2>
@@ -427,6 +432,7 @@ function renderMoreMenu() {
             <button class="row" id="report-more"><span class="avatar" style="background:var(--surface-2)">${ico('file')}</span><span class="grow"><span class="title">Relatório em PDF ou Excel</span><span class="small muted">Extrato de um mês ou de qualquer período</span></span></button>
             ${menuRow('import', 'upload', 'Importar extrato ou planilha', 'OFX do banco, CSV de banco/cartão ou o CSV exportado daqui')}
             ${menuRow('backup', 'shield', 'Backup e restauração', 'Salvar uma cópia de tudo ou voltar a uma cópia')}
+            ${state.sync && state.sync.available ? menuRow('sync', 'repeat', 'Sincronização', state.sync.configured ? `Conectado · última: ${syncWhen(state.sync.lastSyncAt)}` : 'Manter computador e celular com os mesmos dados') : ''}
             <a class="row" id="export-csv" href="/api/export.csv" download style="text-decoration:none;color:inherit"><span class="avatar" style="background:var(--surface-2)">${ico('download')}</span><span class="grow title">Exportar para planilha (CSV)</span></a>
             <button class="row" id="demo"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Carregar dados de exemplo</span></button>
             <button class="row" id="wipe"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Mover todos os lançamentos para a lixeira</span></button>
@@ -467,6 +473,11 @@ function renderMoreMenu() {
             toast(err.message);
         }
     };
+    $('#tips').onchange = e => {
+        safeStorage.set('tips', e.target.checked ? '1' : '0');
+        if (e.target.checked) safeStorage.set('tipsSeen', '[]'); // turning them on shows each tip once again
+        toast(e.target.checked ? 'Dicas ligadas' : 'Dicas desligadas');
+    };
     $('#reminders').onchange = e => saveSetting({remindersEnabled: e.target.checked}, e.target.checked ? 'Lembretes ligados' : 'Lembretes desligados', e.target);
     $('#reminder-days').onchange = e => saveSetting({reminderDays: Number(e.target.value)}, 'Antecedência atualizada');
     $$('.chip[data-theme]').forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); render(); });
@@ -501,14 +512,24 @@ function renderMoreMenu() {
 }
 
 function renderCategoriesPage() {
+    const kind = state.catKind || 'EXPENSE';
+    const other = kind === 'EXPENSE' ? 'INCOME' : 'EXPENSE';
+    const list = orderedCategories(kind);
     $('#view').innerHTML = `<div class="stack">${pageHeader('Categorias')}
-        <p class="small muted">Uma categoria pode ter subcategorias (por exemplo, Alimentação › Restaurante). Os totais e o orçamento da categoria principal somam as subcategorias.</p>
-        <div class="list">${orderedCategories().map(c => `<button class="row ${c.parentId ? 'sub-row' : ''}" data-cat="${c.id}">
+        <div class="seg"><button type="button" data-kind="EXPENSE" class="exp ${kind === 'EXPENSE' ? 'active' : ''}">Despesas</button><button type="button" data-kind="INCOME" class="inc ${kind === 'INCOME' ? 'active' : ''}">Receitas</button></div>
+        ${tip('categories', 'Despesas e receitas têm categorias separadas: uma criada para um não aparece no outro, mas dá para copiar. Uma categoria pode ter subcategorias (por exemplo, Alimentação › Restaurante); os totais e o orçamento da principal somam as subcategorias.')}
+        <div class="list">${list.map(c => `<button class="row ${c.parentId ? 'sub-row' : ''}" data-cat="${c.id}">
             ${avatar(c.icon, c.color)}<span class="grow title">${esc(c.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
-            <button class="row" id="new-cat"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova categoria</span></button></div></div>`;
+            <button class="row" id="new-cat"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">${kind === 'INCOME' ? 'Nova categoria de receita' : 'Nova categoria de despesa'}</span></button></div>
+        ${list.some(c => !c.parentId) ? `<button class="btn block" id="copy-all">${ico('copy')} ${other === 'INCOME' ? 'Copiar todas para Receitas' : 'Copiar todas para Despesas'}</button>` : ''}</div>`;
     bindBack();
+    $$('[data-kind]').forEach(b => b.onclick = () => { state.catKind = b.dataset.kind; renderCategoriesPage(); });
     $$('[data-cat]').forEach(b => b.onclick = () => openCategorySheet(state.categories.find(c => c.id === Number(b.dataset.cat))));
-    $('#new-cat').onclick = () => openCategorySheet(null);
+    $('#new-cat').onclick = () => openCategorySheet(null, kind);
+    const copyAll = $('#copy-all');
+    if (copyAll) copyAll.onclick = () => run(async () => {
+        for (const c of list.filter(x => !x.parentId)) await api(`/categories/${c.id}/copy`, {method: 'POST'});
+    }, other === 'INCOME' ? 'Categorias copiadas para Receitas' : 'Categorias copiadas para Despesas');
 }
 
 /* ---------- Accounts ---------- */
@@ -525,7 +546,7 @@ function renderAccountsPage() {
         <div class="card">
             <div class="small muted">Disponível nas contas</div><div style="font-size:1.5rem;font-weight:800">${money(available)}</div>
             ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
-            <p class="small muted" style="margin-top:6px">Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só o que está pago conta.</p></div>
+            ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só o que está pago conta.`)}</div>
         <div class="list">${orderedAccounts(active).map(row).join('')}
             <button class="row" id="new-account"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button></div>
         ${archived.length ? `<h2 class="section-title">Arquivadas</h2><div class="list">${orderedAccounts(archived).map(row).join('')}</div>` : ''}</div>`;
@@ -562,7 +583,7 @@ function openAccountSheet(account) {
             <div class="field"><label for="a-balance">Saldo inicial (${esc(currencySymbol())})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
                 <span class="small muted">Quanto havia na conta antes de começar a lançar aqui. Pode ser negativo.</span></div>
             <div class="field"><label>Ícone</label><div class="icon-picker" id="a-icons"></div></div>
-            ${account ? `<label class="switch-row"><input type="checkbox" id="a-archived" ${account.archived ? 'checked' : ''}><span>Arquivada<span class="small muted" style="display:block">Mantém o histórico, mas não aparece ao lançar.</span></span></label>` : ''}
+            ${account ? `<label class="switch-row"><input type="checkbox" id="a-archived" ${account.archived ? 'checked' : ''}><span>Arquivada${info(`Mantém o histórico, mas não aparece ao lançar.`)}</span></label>` : ''}
             <div class="form-actions">
                 ${account ? '<button type="button" class="btn danger" id="a-del">Excluir</button>' : ''}
                 <button type="submit" class="btn primary">Salvar</button>
@@ -607,7 +628,7 @@ function openAccountSheet(account) {
 /* ---------- Payment methods ---------- */
 function renderMethodsPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Formas de pagamento')}
-        <p class="small muted">Como o pagamento foi feito (Pix, débito, crédito…). É independente da conta de onde o dinheiro saiu.</p>
+        ${tip('methods', `Como o pagamento foi feito (Pix, débito, crédito…). É independente da conta de onde o dinheiro saiu.`)}
         <div class="list">${state.methods.map(m => `<button class="row" data-method="${m.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico('credit-card')}</span><span class="grow title">${esc(m.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-method"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova forma de pagamento</span></button></div></div>`;
@@ -653,9 +674,9 @@ async function renderRecurringPage() {
     if (state.tab !== 'more' || state.sub !== 'recurring') return; // navigated away while loading
     const month = state.occurrences;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Pagamentos recorrentes')}
-        <p class="small muted">Contas e receitas que se repetem todo mês. ${state.settings.autoPayRecurring
+        ${tip('recurring', `Contas e receitas que se repetem todo mês. ${state.settings.autoPayRecurring
             ? 'Hoje elas são <strong>descontadas automaticamente</strong> no vencimento.'
-            : 'Hoje elas ficam <strong>“A pagar”</strong> até você confirmar (mude em Mais → Configurações).'}</p>
+            : 'Hoje elas ficam <strong>“A pagar”</strong> até você confirmar (mude em Mais → Configurações).'}`)}
         <h2 class="section-title">${esc(monthLabel(state.month))}</h2>
         ${month.length ? `<div class="list">${month.map(o => `<button class="row" data-occ="${o.id}">
             ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
@@ -691,18 +712,18 @@ function openRecurringSheet(rule) {
                 <div class="field"><label for="r-amount">Valor (${currencySymbol()})</label><input id="r-amount" inputmode="decimal" placeholder="0,00" value="${fmtInput(rule?.amount)}" ${rule?.variableAmount ? 'disabled' : ''}></div>
                 <div class="field"><label for="r-day">Dia do mês</label><input id="r-day" type="number" min="1" max="31" inputmode="numeric" value="${rule?.dayOfMonth ?? ''}" placeholder="1 a 31"></div>
             </div>
-            <label class="switch-row"><input type="checkbox" id="r-variable" ${rule?.variableAmount ? 'checked' : ''}><span>Valor variável<span class="small muted" style="display:block">O valor muda todo mês (luz, água): você informa ao pagar.</span></span></label>
-            <p class="small muted">Em meses que não têm esse dia (ex.: 30 em fevereiro), vale o último dia do mês.</p>
+            <label class="switch-row"><input type="checkbox" id="r-variable" ${rule?.variableAmount ? 'checked' : ''}><span>Valor variável${info(`O valor muda todo mês (luz, água): você informa ao pagar.`)}</span></label>
+            ${tip('recurring-day', `Em meses que não têm esse dia (ex.: 30 em fevereiro), vale o último dia do mês.`)}
             <div class="grid2">
-                <div class="field"><label for="r-account">Conta</label><select id="r-account">${accountOptions(rule?.accountId ?? defaultAccount)}</select></div>
-                <div class="field"><label for="r-method">Forma de pagamento</label><select id="r-method">${options(state.methods, rule?.paymentMethodId, {none: '—'})}</select></div>
+                <div class="field"><label for="r-account">Conta</label><select id="r-account" data-create="account">${accountOptions(rule?.accountId ?? defaultAccount)}</select></div>
+                <div class="field"><label for="r-method">Forma de pagamento</label><select id="r-method" data-create="method">${options(state.methods, rule?.paymentMethodId, {none: '—'})}</select></div>
             </div>
-            <div class="field"><label for="r-category">Categoria</label><select id="r-category">${options(state.categories, rule?.categoryId, {none: 'Sem categoria'})}</select></div>
+            <div class="field"><label for="r-category">Categoria</label><select id="r-category">${categoryOptions(rule ? rule.type : 'EXPENSE', rule?.categoryId)}</select></div>
             <div class="grid2">
                 <div class="field"><label for="r-start">Começa em</label><select id="r-start" ${rule ? 'disabled' : ''}>${monthOptions(startMonths, rule?.startMonth || current)}</select></div>
                 <div class="field"><label for="r-end">Termina em</label><select id="r-end">${monthOptions(endMonths, rule?.endMonth || '', {none: 'Sem data final'})}</select></div>
             </div>
-            <label class="switch-row"><input type="checkbox" id="r-active" ${rule ? (rule.active ? 'checked' : '') : 'checked'}><span>Ativo<span class="small muted" style="display:block">Pausado, não gera novos pagamentos.</span></span></label>
+            <label class="switch-row"><input type="checkbox" id="r-active" ${rule ? (rule.active ? 'checked' : '') : 'checked'}><span>Ativo${info(`Pausado, não gera novos pagamentos.`)}</span></label>
             <div class="form-actions">
                 ${rule ? '<button type="button" class="btn danger" id="r-del">Excluir</button>' : ''}
                 <button type="submit" class="btn primary">Salvar</button>
@@ -710,6 +731,9 @@ function openRecurringSheet(rule) {
         </form>`);
     const paintType = () => {
         $$('.seg button', sheet).forEach(b => b.classList.toggle('active', b.dataset.type === type));
+        const picked = $('#r-category', sheet);
+        const keep = picked.value && (catById(Number(picked.value)) || {}).kind === kindOf(type) ? Number(picked.value) : null;
+        picked.innerHTML = categoryOptions(type, keep);
     };
     $$('.seg button', sheet).forEach(b => b.onclick = () => { type = b.dataset.type; paintType(); });
     paintType();
@@ -811,7 +835,7 @@ function openPotSheet(pot) {
                 <div class="field"><label for="p-start">Começa em</label><select id="p-start" ${pot ? 'disabled' : ''}>${monthOptions(monthRange(shiftMonth(current, -12), 19), pot?.startMonth || current)}</select></div>
             </div>
             <div class="field"><label>Ícone</label><div class="icon-picker" id="p-icons"></div></div>
-            <label class="switch-row"><input type="checkbox" id="p-active" ${pot ? (pot.active ? 'checked' : '') : 'checked'}><span>Ativa<span class="small muted" style="display:block">Pausada, não recebe aportes automáticos.</span></span></label>
+            <label class="switch-row"><input type="checkbox" id="p-active" ${pot ? (pot.active ? 'checked' : '') : 'checked'}><span>Ativa${info(`Pausada, não recebe aportes automáticos.`)}</span></label>
             <div class="form-actions">
                 ${pot ? '<button type="button" class="btn danger" id="p-del">Excluir</button>' : ''}
                 <button type="submit" class="btn primary">Salvar</button>
@@ -906,7 +930,7 @@ function openWishSheet(item) {
             </div>
             <div class="field"><label for="w-url">Link</label><input id="w-url" maxlength="500" placeholder="Opcional" value="${esc(item?.url)}"></div>
             <div class="field"><label for="w-notes">Observação</label><textarea id="w-notes" rows="2" maxlength="255">${esc(item?.notes)}</textarea></div>
-            <p class="small muted">Enquanto está na lista, o item não pertence a nenhuma conta. A conta é escolhida quando você marcar “Comprei”.</p>
+            ${tip('wish-account', `Enquanto está na lista, o item não pertence a nenhuma conta. A conta é escolhida quando você marcar “Comprei”.`)}
             <div class="form-actions">
                 ${item ? '<button type="button" class="btn danger" id="w-del">Excluir</button>' : ''}
                 ${item && item.status === 'WISHED' ? '<button type="button" class="btn" id="w-discard">Descartar</button>' : ''}
@@ -947,11 +971,11 @@ function openBuySheet(item) {
             <p class="small muted center">${item.estimatedPrice != null ? `Estimado: ${money(item.estimatedPrice)}. ` : ''}Informe o preço real que você pagou.</p>
             ${dateField('b2-date', todayIso(), 'Data da compra')}
             <div class="grid2">
-                <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account">${accountOptions(defaultAccount)}</select></div>
-                <div class="field"><label for="b2-method">Forma de pagamento</label><select id="b2-method">${options(state.methods, null, {none: '—'})}</select></div>
+                <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account" data-create="account">${accountOptions(defaultAccount)}</select></div>
+                <div class="field"><label for="b2-method">Forma de pagamento</label><select id="b2-method" data-create="method">${options(state.methods, null, {none: '—'})}</select></div>
             </div>
-            <div class="field"><label for="b2-category">Categoria</label><select id="b2-category">${options(state.categories, null, {none: 'Sem categoria'})}</select></div>
-            ${pot ? `<label class="switch-row"><input type="checkbox" id="b2-pot" ${Number(pot.balance) > 0 && (item.estimatedPrice == null || Number(pot.balance) >= Number(item.estimatedPrice)) ? 'checked' : ''}><span>Descontar da caixinha “${esc(pot.name)}”<span class="small muted" style="display:block">Saldo atual: ${money(pot.balance)}</span></span></label>` : ''}
+            <div class="field"><label for="b2-category">Categoria</label><select id="b2-category">${categoryOptions('EXPENSE', null)}</select></div>
+            ${pot ? `<label class="switch-row"><input type="checkbox" id="b2-pot" ${Number(pot.balance) > 0 && (item.estimatedPrice == null || Number(pot.balance) >= Number(item.estimatedPrice)) ? 'checked' : ''}><span>Descontar da caixinha “${esc(pot.name)}”${info(`Saldo atual: ${money(pot.balance)}`)}</span></label>` : ''}
             <div class="form-actions"><button type="submit" class="btn primary">Registrar compra</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'b2-date');
@@ -982,7 +1006,7 @@ async function renderTrashPage() {
     }
     if (state.tab !== 'more' || state.sub !== 'trash') return; // navigated away while loading
     $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}
-        <p class="small muted">O que você exclui vem para cá e fica guardado por 30 dias; depois é apagado de vez. Restaurar traz o item de volta com a mesma data e conta.</p>
+        ${tip('trash', `O que você exclui vem para cá e fica guardado por 30 dias; depois é apagado de vez. Restaurar traz o item de volta com a mesma data e conta.`)}
         ${items.length ? `<div class="list">${items.map(i => `<div class="row" data-trash="${i.kind}:${i.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico(i.kind === 'TRANSFER' ? 'transfer' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${esc(i.detail)} · ${isoToBr(i.date)} · excluído em ${dateTimeBr(i.deletedAt)}</span></span>
@@ -1008,3 +1032,125 @@ async function renderTrashPage() {
         try { await api('/trash', {method: 'DELETE'}); await refresh('Lixeira esvaziada'); } catch (e) { toast(e.message); }
     };
 }
+
+/* ---------- Short explanations ----------
+   "?" next to a setting: the explanation shows only when asked for. Tips are explanations spread over the screens: off
+   until turned on in Configurações, and each one shows once, with a button to dismiss it for good. */
+function info(text) {
+    return `<button type="button" class="info-btn" aria-label="Saiba mais" aria-expanded="false">?</button><span class="info-text small muted" hidden>${text}</span>`;
+}
+const tipsOn = () => safeStorage.get('tips') === '1';
+const tipsSeen = () => { try { return JSON.parse(safeStorage.get('tipsSeen') || '[]'); } catch (e) { return []; } };
+function tip(id, html) {
+    if (!tipsOn() || tipsSeen().includes(id)) return '';
+    return `<div class="tip" data-tip="${id}"><span class="small muted">${html}</span><button type="button" class="chip" data-tip-ok="${id}">Entendi</button></div>`;
+}
+document.addEventListener('click', e => {
+    const button = e.target.closest('.info-btn');
+    if (button) {
+        e.preventDefault();
+        const text = button.nextElementSibling;
+        const show = text.hidden;
+        text.hidden = !show;
+        button.setAttribute('aria-expanded', String(show));
+        return;
+    }
+    const ok = e.target.closest('[data-tip-ok]');
+    if (ok) {
+        safeStorage.set('tipsSeen', JSON.stringify([...tipsSeen(), ok.dataset.tipOk]));
+        const box = ok.closest('.tip');
+        if (box) box.remove();
+    }
+});
+
+/* ---------- Create without leaving the form ----------
+   Category, account and payment method can be created from the screen that needs them (a small form over it, so what
+   was typed stays); it resolves with the new item, or null when cancelled. */
+function quickCreate(kind, {categoryKind = 'EXPENSE'} = {}) {
+    return new Promise(resolve => {
+        const root = $('#confirm-root');
+        const title = {category: categoryKind === 'INCOME' ? 'Nova categoria de receita' : 'Nova categoria de despesa',
+            account: 'Nova conta', method: 'Nova forma de pagamento'}[kind];
+        root.innerHTML = `<div class="overlay confirm-overlay"><div class="sheet quick" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <h2>${title}</h2>
+            <form id="qc-form" novalidate>
+                <div class="field"><label for="qc-name">Nome</label><input id="qc-name" maxlength="80" autocomplete="off"></div>
+                ${kind === 'account' ? `<div class="field"><label for="qc-type">Tipo</label><select id="qc-type">${Object.entries(ACCOUNT_TYPES).map(([k, v]) =>
+                    `<option value="${k}">${v}</option>`).join('')}</select></div>
+                    <div class="grid2" id="qc-card" hidden>
+                        <div class="field"><label for="qc-closing">Dia de fechamento</label><input id="qc-closing" inputmode="numeric" maxlength="2" placeholder="Ex.: 10"></div>
+                        <div class="field"><label for="qc-due">Dia de vencimento</label><input id="qc-due" inputmode="numeric" maxlength="2" placeholder="Ex.: 20"></div></div>` : ''}
+                ${kind !== 'method' ? '<div class="field"><label>Cor</label><div class="swatches" id="qc-colors"></div></div>' : ''}
+                ${kind === 'category' ? `<div class="field"><label>Ícone</label><div class="icon-picker" id="qc-icons"></div>
+                    ${nativeDatePicker ? '<input id="qc-emoji" class="emoji-input" maxlength="16" placeholder="ou um emoji, ex.: 🐶" autocomplete="off" aria-label="Emoji">' : ''}</div>` : ''}
+                <div class="form-actions"><button type="button" class="btn" id="qc-cancel">Cancelar</button><button type="submit" class="btn primary">Criar</button></div>
+            </form></div></div>`;
+        const colorOf = kind !== 'method' ? colorPicker(root, '#qc-colors', kind === 'account' ? '#64B5F6' : '#6750A4') : null;
+        let icon = 'tag';
+        if (kind === 'category') {
+            const paintIcons = () => {
+                const choices = PICKABLE_ICONS.includes(icon) ? PICKABLE_ICONS : [icon, ...PICKABLE_ICONS];
+                $('#qc-icons', root).innerHTML = choices.map(k =>
+                    `<button type="button" class="icon-opt ${k === icon ? 'active' : ''}" data-icon="${esc(k)}" aria-label="${esc(k)}">${ico(k)}</button>`).join('');
+                $$('.icon-opt', root).forEach(b => b.onclick = () => { icon = b.dataset.icon; paintIcons(); });
+            };
+            paintIcons();
+            const emoji = $('#qc-emoji', root);
+            if (emoji) emoji.oninput = () => {
+                const typed = emoji.value.trim();
+                if (typed) { icon = typed; paintIcons(); }
+            };
+        }
+        const done = value => { layerClose('confirm'); root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(value); };
+        const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+        document.addEventListener('keydown', onKey, true);
+        layerOpen('confirm', () => done(null));
+        $('#qc-cancel', root).onclick = () => done(null);
+        $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) done(null); });
+        const type = $('#qc-type', root);
+        if (type) type.onchange = () => { $('#qc-card', root).hidden = type.value !== 'CREDIT_CARD'; };
+        $('#qc-form', root).onsubmit = async e => {
+            e.preventDefault();
+            const name = $('#qc-name', root).value.trim();
+            if (!name) return toast('Informe o nome.');
+            try {
+                let created;
+                if (kind === 'category') {
+                    created = await api('/categories', {method: 'POST', body: {name, icon, color: colorOf(), kind: categoryKind}});
+                    state.categories = await api('/categories');
+                } else if (kind === 'account') {
+                    const card = type.value === 'CREDIT_CARD';
+                    const closingDay = Number($('#qc-closing', root).value), dueDay = Number($('#qc-due', root).value);
+                    if (card && !(closingDay >= 1 && closingDay <= 31 && dueDay >= 1 && dueDay <= 31)) return toast('Informe o dia de fechamento e o de vencimento (de 1 a 31).');
+                    created = await api('/accounts', {method: 'POST', body: {name, type: type.value, color: colorOf(), icon: 'bank', initialBalance: 0,
+                        parentId: null, archived: false, closingDay: card ? closingDay : null, dueDay: card ? dueDay : null}});
+                    state.accounts = await api('/accounts');
+                } else {
+                    created = await api('/payment-methods', {method: 'POST', body: {name}});
+                    state.methods = await api('/payment-methods');
+                }
+                toast(kind === 'category' ? 'Categoria criada' : kind === 'account' ? 'Conta criada' : 'Forma de pagamento criada');
+                done(created);
+            } catch (err) {
+                toast(err.message);
+            }
+        };
+        $('#qc-name', root).focus();
+    });
+}
+
+/** Called by the dropdowns marked data-create: creates the item and selects it (the other dropdowns of the kind get it too). */
+async function quickCreateFor(select) {
+    const kind = select.dataset.create;
+    const created = await quickCreate(kind);
+    if (!created) return;
+    $$(`select[data-create="${kind}"]`).forEach(s => {
+        const keepNone = s.options.length && s.options[0].value === '' ? s.options[0].outerHTML : '';
+        const current = s === select ? created.id : Number(s.value) || null;
+        s.innerHTML = kind === 'account' ? accountOptions(current)
+            : keepNone + state.methods.map(m => `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+        s.value = current == null ? '' : String(current);
+        if (s === select) s.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+}
+window.quickCreateFor = quickCreateFor;

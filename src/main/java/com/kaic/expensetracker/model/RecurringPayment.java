@@ -14,7 +14,7 @@ import java.time.YearMonth;
 @Table(name = "recurring_payments")
 @Getter
 @Setter
-public class RecurringPayment {
+public class RecurringPayment extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

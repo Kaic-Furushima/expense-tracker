@@ -117,6 +117,81 @@ public class ExpenseService {
         return created;
     }
 
+    /** One installment of a custom plan: due date, situation (null = the default rule) and amount (null = an equal share). */
+    public record Slot(LocalDate date, ExpenseStatus status, BigDecimal amount) {
+    }
+
+    /**
+     * Creates a purchase split in installments that follow a custom plan: each one has its own date, may be already
+     * paid or still to pay, and may have its own amount. When no installment has an amount, the purchase total is
+     * split like {@link #saveInstallments(Expense, int)}; otherwise the amounts given are used as they are, and the
+     * ones left blank share what is left of the total.
+     */
+    @Transactional
+    public List<Expense> saveInstallments(Expense template, List<Slot> plan) {
+        int count = plan.size();
+        if (count < 2 || count > MAX_INSTALLMENTS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "O número de parcelas deve ficar entre 2 e " + MAX_INSTALLMENTS + ".");
+        }
+        BigDecimal total = template.getAmount();
+        BigDecimal[] amounts = new BigDecimal[count];
+        BigDecimal given = BigDecimal.ZERO;
+        int blank = 0;
+        for (int i = 0; i < count; i++) {
+            if (plan.get(i).date() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe a data de cada parcela.");
+            }
+            BigDecimal a = plan.get(i).amount();
+            if (a == null) {
+                blank++;
+            } else if (a.signum() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O valor de cada parcela deve ser maior que zero.");
+            } else {
+                amounts[i] = a.setScale(2, RoundingMode.HALF_UP);
+                given = given.add(amounts[i]);
+            }
+        }
+        if (blank > 0) {
+            BigDecimal rest = total.subtract(given);
+            BigDecimal each = rest.divide(BigDecimal.valueOf(blank), 2, RoundingMode.DOWN);
+            if (each.signum() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O valor é pequeno demais para tantas parcelas.");
+            }
+            BigDecimal leftover = rest.subtract(each.multiply(BigDecimal.valueOf(blank)));
+            boolean firstBlank = true;
+            for (int i = 0; i < count; i++) {
+                if (amounts[i] == null) {
+                    amounts[i] = firstBlank ? each.add(leftover) : each;
+                    firstBlank = false;
+                }
+            }
+        }
+        boolean card = template.getAccount().getType() == AccountType.CREDIT_CARD;
+        String group = UUID.randomUUID().toString();
+        List<Expense> ordered = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            Slot slot = plan.get(i);
+            Expense e = new Expense();
+            e.setName(template.getName());
+            e.setDescription(template.getDescription());
+            e.setAmount(amounts[i]);
+            e.setDate(slot.date());
+            e.setType(template.getType());
+            e.setStatus(slot.status() != null ? slot.status()
+                    : (i == 0 || card ? template.getStatus() : ExpenseStatus.PENDING));
+            e.setCategory(template.getCategory());
+            e.setAccount(template.getAccount());
+            e.setPaymentMethod(template.getPaymentMethod());
+            e.getTags().addAll(template.getTags());
+            e.setInstallmentGroup(group);
+            e.setInstallmentNumber(i + 1);
+            e.setInstallmentTotal(count);
+            ordered.add(expenseRepository.save(e));
+        }
+        return ordered;
+    }
+
     /**
      * Sends an installment and the ones after it to the trash; returns their ids (so the caller can offer "undo").
      * A transaction that is not an installment is trashed alone.

@@ -490,3 +490,26 @@ select.pick-native { position: absolute; width: 1px; height: 1px; padding: 0; ma
 .pick-item .i { width: 20px; height: 20px; flex: none; }
 .pick-item:disabled { opacity: .45; }
 .pick-none { padding: 14px 0; text-align: center; }
+
+details.card > summary { cursor: pointer; }
+.tutorial { padding-left: 1.2rem; margin: .4rem 0; display: grid; gap: .5rem; }
+.tutorial .btn.small { padding: .15rem .6rem; min-height: 0; display: inline-block; }
+
+/* Explanations on demand (?), tips, installment plan, quick create */
+.info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 8px; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: .72rem; font-weight: 800; vertical-align: middle; border: 1px solid var(--border); }
+.info-text { display: block; margin-top: 4px; }
+.info-text[hidden] { display: none; }
+.tip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: var(--primary-soft); }
+.tip > span { flex: 1; }
+.tip .chip { flex: none; }
+.date-quick { flex-wrap: wrap; }
+.cat-new .avatar { background: var(--surface-2); }
+.plan { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.plan-rows { display: flex; flex-direction: column; gap: 6px; }
+.plan-row { display: grid; grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr) 88px; gap: 6px; align-items: center; }
+.plan-n { font-size: .75rem; color: var(--muted); font-weight: 700; }
+.plan-row input { min-width: 0; padding: 8px 10px; }
+.plan-status { padding: 6px 4px; text-align: center; white-space: nowrap; }
+.plan-bad { color: var(--expense); }
+.quick { max-width: 420px; }
+.pick-create { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 8px; margin-top: 4px; border-top: 1px solid var(--border); color: var(--primary); font-weight: 700; }

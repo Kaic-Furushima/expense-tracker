@@ -28,7 +28,8 @@ public class ProfileController {
     public record LanguageRequest(String language) {
     }
 
-    public record ProfilesResponse(List<ProfileService.Profile> profiles, String current, String language, boolean canCreate) {
+    public record ProfilesResponse(List<ProfileService.Profile> profiles, List<ProfileService.TrashedProfile> trashed, String current,
+                                   String language) {
     }
 
     private final ProfileService profiles;
@@ -64,6 +65,20 @@ public class ProfileController {
         return wasCurrent ? switchTo(ProfileContext.MAIN, response) : snapshot(ProfileContext.current());
     }
 
+    /** Takes a profile out of the trash. */
+    @PostMapping("/profiles/{id}/restore")
+    public ProfilesResponse restore(@PathVariable String id) {
+        profiles.restore(id);
+        return snapshot(ProfileContext.current());
+    }
+
+    /** Deletes a profile that is in the trash for good (the sync tells the other devices). */
+    @DeleteMapping("/profiles/{id}/purge")
+    public ProfilesResponse purge(@PathVariable String id) {
+        profiles.purge(id);
+        return snapshot(ProfileContext.current());
+    }
+
     @PostMapping("/profiles/{id}/switch")
     public ProfilesResponse select(@PathVariable String id, HttpServletResponse response) {
         return switchTo(id, response);
@@ -84,6 +99,6 @@ public class ProfileController {
     }
 
     private ProfilesResponse snapshot(String current) {
-        return new ProfilesResponse(profiles.list(), current, profiles.language(), profiles.canCreate());
+        return new ProfilesResponse(profiles.list(), profiles.trashed(), current, profiles.language());
     }
 }

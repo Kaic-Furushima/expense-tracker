@@ -14,7 +14,7 @@ import java.time.LocalDate;
 @Table(name = "pot_entries")
 @Getter
 @Setter
-public class PotEntry {
+public class PotEntry extends SyncEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

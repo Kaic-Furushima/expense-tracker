@@ -40,4 +40,8 @@ self.addEventListener('activate', event => event.waitUntil(
     self.registration.unregister().then(() => caches.keys()).then(keys => Promise.all(keys.map(k => caches.delete(k))))));
 `);
 
+// Servidor de sync padrao (opcional): sync-hub.json na raiz de mobile/ vira www/hub.json. Vazio = cada pessoa usa o seu projeto.
+const hubFile = join(root, 'sync-hub.json');
+writeFileSync(join(www, 'hub.json'), existsSync(hubFile) ? readFileSync(hubFile, 'utf8') : '{"url":"","anonKey":""}');
+
 console.log('www/ pronto');

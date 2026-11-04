@@ -60,7 +60,7 @@ beforeEach(async () => {
 
 describe('perfil principal', () => {
     it('comeca com so o principal', async () => {
-        assert.deepEqual(await ok('GET', '/profiles'), {profiles: [{id: MAIN, name: 'Principal'}], current: MAIN, language: 'pt', canCreate: true});
+        assert.deepEqual(await ok('GET', '/profiles'), {profiles: [{id: MAIN, name: 'Principal'}], trashed: [], current: MAIN, language: 'pt'});
         assert.equal(ask('GET', '/accounts').length, 1);
     });
 
@@ -78,7 +78,7 @@ describe('criar', () => {
         assert.deepEqual(snap.profiles.map(p => p.name), ['Principal', 'Maria Silva']);
         assert.equal(snap.current, snap.profiles[1].id);
         assert.match(snap.current, /^abc\d{5}$/);
-        assert.deepEqual([ask('GET', '/categories').length, ask('GET', '/accounts').length, ask('GET', '/payment-methods').length, ask('GET', '/expenses').length], [11, 1, 6, 0]);
+        assert.deepEqual([ask('GET', '/categories').length, ask('GET', '/accounts').length, ask('GET', '/payment-methods').length, ask('GET', '/expenses').length], [12, 1, 6, 0]);
     });
 
     it('os dados de cada perfil sao separados', async () => {
@@ -148,22 +148,75 @@ describe('trocar, renomear e remover', () => {
         await rejects(call('PUT', `/profiles/${maria}`, {name: ''}), 400);
     });
 
-    it('remover o perfil em uso volta para o principal e apaga os dados dele', async () => {
+    it('remover o perfil em uso volta para o principal e o manda para a lixeira, sem apagar nada', async () => {
         ask('POST', '/expenses', {name: 'Da Maria', amount: 20, date: '2026-05-02'});
         const snap = await ok('DELETE', `/profiles/${maria}`);
         assert.deepEqual([snap.current, snap.profiles.map(p => p.id)], [MAIN, [MAIN]]);
-        assert.deepEqual(deleted, [maria]);
-        assert.equal(files[maria], undefined);
+        assert.deepEqual(snap.trashed.map(t => [t.id, t.name]), [[maria, 'Maria']]);
+        assert.deepEqual(deleted, [], 'a lixeira nao apaga');
+        assert.ok(files[maria], 'os dados continuam guardados');
         assert.equal(ask('GET', '/expenses').length, 0);
         profiles = await fresh();
         assert.equal(profiles.list().length, 1);
+        assert.equal(profiles.trashed().length, 1, 'e a lixeira sobrevive ao reabrir o app');
     });
 
     it('remover outro perfil nao troca o que esta em uso', async () => {
         await ok('POST', `/profiles/${MAIN}/switch`);
         const snap = await ok('DELETE', `/profiles/${maria}`);
         assert.equal(snap.current, MAIN);
-        assert.deepEqual(deleted, [maria]);
+        assert.deepEqual(deleted, []);
+    });
+
+    it('ninguem troca para um perfil da lixeira, e ele nao conta no limite', async () => {
+        await ok('DELETE', `/profiles/${maria}`);
+        await rejects(call('POST', `/profiles/${maria}/switch`), 404);
+        await rejects(call('DELETE', `/profiles/${maria}`), 404, 'Perfil não encontrado.');
+        for (let i = 0; i < MAX_PROFILES - 1; i++) { await ok('POST', '/profiles', {name: `P${i}`}); await ok('DELETE', `/profiles/${profiles.current}`); }
+        assert.equal((await ok('POST', '/profiles', {name: 'Novo'})).profiles.at(-1).name, 'Novo');
+    });
+
+    it('restaurar tira da lixeira (e o nome ganha um numero se foi tomado)', async () => {
+        await ok('DELETE', `/profiles/${maria}`);
+        await ok('POST', '/profiles', {name: 'Maria'}); // o nome esta livre enquanto o outro esta na lixeira
+        const snap = await ok('POST', `/profiles/${maria}/restore`);
+        assert.deepEqual(snap.profiles.map(p => p.name), ['Principal', 'Maria (2)', 'Maria']);
+        assert.deepEqual(snap.trashed, []);
+        await rejects(call('POST', `/profiles/${maria}/restore`), 404);
+    });
+
+    it('excluir de vez so vale para quem esta na lixeira, apaga os dados e avisa o sync', async () => {
+        await rejects(call('DELETE', `/profiles/${maria}/purge`), 400);
+        const syncId = profiles.syncIdOf(maria);
+        await ok('DELETE', `/profiles/${maria}`);
+        const snap = await ok('DELETE', `/profiles/${maria}/purge`);
+        assert.deepEqual([snap.trashed, deleted], [[], [maria]]);
+        assert.equal(files[maria], undefined);
+        assert.deepEqual(profiles.purged().map(p => p.syncId), [syncId]);
+        assert.equal(profiles.existsAny(maria), false);
+    });
+
+    it('a identidade de sync: o principal e "default", os outros ganham uma propria e estavel', async () => {
+        assert.equal(profiles.syncIdOf(MAIN), 'default');
+        const id = profiles.syncIdOf(maria);
+        assert.match(id, /^[0-9a-f-]{36}$/);
+        profiles = await fresh();
+        assert.equal(profiles.syncIdOf(maria), id);
+        assert.equal(profiles.idOfSync(id), maria);
+        assert.equal(profiles.idOfSync('default'), MAIN);
+        assert.equal(profiles.idOfSync('nao-existe'), null);
+    });
+
+    it('withRuntime abre o banco de outro perfil so por um instante e grava o que mudou', async () => {
+        await profiles.withRuntime(MAIN, async runtime => {
+            runtime.api.handle('POST', '/expenses', {name: 'do principal', amount: 1, date: '2026-05-02', accountId: runtime.api.handle('GET', '/accounts').body[0].id});
+        });
+        const openedBefore = opened.length;
+        await profiles.withRuntime(maria, async runtime => { runtime.api.handle('POST', '/categories', {name: 'so da Maria'}); });
+        assert.equal(opened.length, openedBefore + (profiles.current === maria ? 0 : 1), 'abre o banco so se nao for o em uso');
+        assert.ok(files[maria] || profiles.current === maria, 'e grava o que mudou');
+        const names = await profiles.withRuntime(MAIN, async runtime => runtime.api.handle('GET', '/expenses').body.map(e => e.name));
+        assert.deepEqual(names, ['do principal']);
     });
 
     it('o principal nao pode ser removido; perfil inexistente e 404', async () => {
@@ -199,7 +252,7 @@ describe('apagar tudo (esqueci a senha)', () => {
         assert.deepEqual(profiles.snapshot().profiles.map(p => p.id), [MAIN]);
         assert.equal(profiles.current, MAIN);
         assert.equal(ask('GET', '/expenses').length, 0);
-        assert.equal(ask('GET', '/categories').length, 11);
+        assert.equal(ask('GET', '/categories').length, 12);
         profiles = await fresh();
         assert.deepEqual(profiles.list().map(p => p.id), [MAIN]);
     });
