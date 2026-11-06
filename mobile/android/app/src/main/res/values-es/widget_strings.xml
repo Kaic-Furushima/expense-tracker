@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_balance_label">Saldo</string>
+    <string name="widget_progress_label">Presupuesto o hucha</string>
+    <string name="widget_balance_description">Saldo total o de una cuenta, con botón opcional para registrar.</string>
+    <string name="widget_progress_description">Cuánto queda del presupuesto o cuánto se ha guardado en la hucha, con botón opcional para registrar.</string>
+    <string name="widget_open_app">Abre la app para activar el widget.</string>
+    <string name="widget_add_description">Nuevo movimiento</string>
+    <string name="widget_config_choose_balance">Mostrar el saldo de</string>
+    <string name="widget_config_choose_progress">Mostrar</string>
+    <string name="widget_config_button">Mostrar el botón «+» para registrar</string>
+    <string name="widget_config_done">Añadir widget</string>
+    <string name="widget_config_waiting">Abre la app una vez para listar las opciones. Por ahora el widget mostrará lo predeterminado.</string>
+    <string name="widget_default_balance">Saldo total</string>
+    <string name="widget_default_progress">Presupuesto · General</string>
+</resources>

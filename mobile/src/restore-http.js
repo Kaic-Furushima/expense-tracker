@@ -31,9 +31,24 @@ export function createRestoreHttp({profiles, sync, backupsFor}) {
         return {status: 200, body: {profileId: target, created: isNew, syncError}};
     }
 
+    /**
+     * "Limpar tudo" e restaurar a copia que ele deixa na lixeira trocam TODOS os dados do perfil em uso: com o sync ligado, a
+     * nuvem e os outros aparelhos tambem ficam iguais (senao o que foi apagado voltaria no proximo sync).
+     */
+    async function replaceAll(method, path, body) {
+        const result = profiles.runtime.api.handle(method, path, body);
+        if (result.status < 300 && sync.connected()) {
+            try { await sync.forceOverwrite(profiles.current); } catch (e) { /* o proximo sync tenta de novo */ }
+        }
+        return result;
+    }
+
     return {
         /** Devolve {status, body} ou null se a rota nao for de restauracao. */
         async handle(method, path, body) {
+            if ((method === 'DELETE' && path === '/api/data') || (method === 'POST' && /^\/trash\/EVERYTHING\/\d+\/restore$/.test(path))) {
+                return replaceAll(method, path, body);
+            }
             if (method !== 'POST') return null;
             if (path === '/backups/restore') {
                 if (typeof body?.content !== 'string' || !body.content.trim()) throw new HttpError(400, 'Dados inválidos.', {content: 'O arquivo está vazio.'});

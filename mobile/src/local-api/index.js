@@ -50,13 +50,13 @@ export function createApi(sqlDb, options = {}) {
     const wishes = new Wishes(db, catalog, expenses, pots);
     const upcoming = new Upcoming(db, catalog, invoices, recurring);
     const importer = new Importer(db, catalog, expenses, transfers);
-    const demo = new Demo(db, catalog, expenses, transfers, budgets);
+    const demo = new Demo(db, catalog, expenses, transfers, budgets, {recurring, pots, wishes, templates});
     const messages = new Messages(settings);
     const reminders = new Reminders(settings, messages, upcoming, summary);
     const reports = new Reports(db, catalog, settings, messages);
     const backup = new Backup(db);
     const router = new Router();
-    const trash = new Trash(db);
+    const trash = new Trash(db, {backup, reseed: () => seed(db, settings.language())});
     trash.purgeExpired();
     registerRoutes(router, {db, settings, catalog, expenses, transfers, invoices, recurring, pots, wishes, templates, attachments, reminders, importer, demo, trash, budgets, summary, upcoming});
 
@@ -227,7 +227,7 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
         return settings.snapshot();
     });
     r.post('/api/demo-data', () => { demo.load(); return noContent(); });
-    r.delete('/api/data', () => { expenses.trashAll(); return noContent(); });
+    r.delete('/api/data', () => { trash.trashEverything(); return noContent(); });
     r.get('/api/export.csv', () => ({status: 200, text: exportCsv(db), contentType: 'text/csv;charset=UTF-8'}));
     r.get('/api/reminders', () => reminders.current(db.clock));
     r.get('/api/about', () => ({version: APP_VERSION, dataFolder: 'dentro do aplicativo, neste aparelho', startupAvailable: false, startupEnabled: false}));

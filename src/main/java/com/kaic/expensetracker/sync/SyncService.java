@@ -209,6 +209,19 @@ public class SyncService {
         store.put("last", Map.of("at", System.currentTimeMillis()));
     }
 
+    /**
+     * After "Limpar tudo" or the restore of its copy: the cloud follows (like after a backup restore). A failure is only
+     * logged: the data here is already changed, and the next sync tries again.
+     */
+    public void overwriteCloudAfterReplace(String profileId) {
+        if (!connected()) return;
+        try {
+            forceOverwrite(profileId);
+        } catch (RuntimeException e) {
+            log.warn("Não foi possível atualizar a nuvem depois de trocar todos os dados", e);
+        }
+    }
+
     public boolean connected() {
         return config() != null;
     }

@@ -6,6 +6,7 @@ import {createApi} from './local-api/index.js';
 import {createNativeBackupFolder, installNativeFiles} from './native-files.js';
 import {installNativeBack} from './native-back.js';
 import {installNativeNotifications} from './native-notifications.js';
+import {installNativeWidgets} from './native-widgets.js';
 import {MAIN, Profiles} from './profiles.js';
 import {SyncService} from './sync/service.js';
 import {createSyncHttp} from './sync/sync-http.js';
@@ -200,6 +201,7 @@ async function start() {
         flush: () => profiles.runtime.flush()
     };
     installNativeNotifications(() => profiles.runtime.api); // so no Android: avisos agendados (do perfil em uso)
+    installNativeWidgets({getApi: () => profiles.runtime.api, access}); // so no Android: widgets da tela inicial
     return {profiles, access, sync, restoreHttp};
 }
 
@@ -280,6 +282,7 @@ window.fetch = async function (input, init = {}) {
         await profiles.runtime.flush();
         if (!url.pathname.startsWith('/api/sync')) sync.notifyChange(); // agenda um sync logo depois de salvar
         if (window.nativeNotifications) window.nativeNotifications.refreshSoon(); // contas e limites mudaram: reagenda os avisos
+        if (window.nativeWidgets) window.nativeWidgets.refreshSoon(); // saldos, senha ou perfil mudaram: atualiza os widgets
     }
     if (result.bytes !== undefined) {
         return new Response(result.bytes, {status: result.status, headers: {'Content-Type': result.contentType || 'application/octet-stream'}});

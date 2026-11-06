@@ -1,5 +1,7 @@
 package com.kaic.expensetracker.controller;
 
+import com.kaic.expensetracker.profile.ProfileContext;
+import com.kaic.expensetracker.sync.SyncService;
 import com.kaic.expensetracker.service.TrashService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -18,9 +20,11 @@ import java.util.List;
 public class TrashController {
 
     private final TrashService service;
+    private final SyncService sync;
 
-    public TrashController(TrashService service) {
+    public TrashController(TrashService service, SyncService sync) {
         this.service = service;
+        this.sync = sync;
     }
 
     @GetMapping
@@ -32,6 +36,7 @@ public class TrashController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void restore(@PathVariable TrashService.Kind kind, @PathVariable Long id) {
         service.restore(kind, id);
+        if (kind == TrashService.Kind.EVERYTHING) sync.overwriteCloudAfterReplace(ProfileContext.current());
     }
 
     /** Removes one item for good. */

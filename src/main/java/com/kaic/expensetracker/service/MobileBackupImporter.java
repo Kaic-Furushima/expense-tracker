@@ -7,10 +7,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,6 +94,54 @@ final class MobileBackupImporter {
 
     MobileBackupImporter(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    private static final DateTimeFormatter MOMENT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS");
+
+    /** All the data as the phone's backup JSON (the inverse of {@link #restore}). */
+    String dump() {
+        Map<String, Object> tables = new LinkedHashMap<>();
+        for (Table t : TABLES) {
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Map<String, Object> row : jdbc.queryForList("select * from " + t.name())) {
+                Map<String, Object> out = new LinkedHashMap<>();
+                for (Col c : t.cols()) out.put(c.from(), toPhone(c.kind(), row.get(c.to().toUpperCase())));
+                rows.add(out);
+            }
+            tables.put(t.name(), rows);
+        }
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("app", APP);
+        root.put("format", 1);
+        root.put("schemaVersion", 1); // the oldest: the phone restores it as it is, nothing newer is needed
+        root.put("createdAt", LocalDateTime.now().format(MOMENT));
+        root.put("tables", tables);
+        try {
+            return json.writeValueAsString(root);
+        } catch (Exception e) {
+            throw new IllegalStateException("Não foi possível guardar a cópia dos dados", e);
+        }
+    }
+
+    private static Object toPhone(Kind kind, Object v) {
+        if (v == null) return null;
+        return switch (kind) {
+            case TEXT -> v.toString();
+            case INT -> ((Number) v).longValue();
+            case CENTS -> ((BigDecimal) v).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValue();
+            case BOOL -> Boolean.TRUE.equals(v) || (v instanceof Number n && n.longValue() != 0) ? 1 : 0;
+            case TS -> ((Timestamp) v).toLocalDateTime().format(MOMENT);
+            case DATE -> v instanceof Date d ? d.toLocalDate().toString() : v.toString().substring(0, 10);
+        };
+    }
+
+    /** Removes every row of every table the backup covers, and starts the ids over (the settings keep the language). */
+    void wipe() {
+        for (int i = TABLES.size() - 1; i >= 0; i--) {
+            Table t = TABLES.get(i);
+            jdbc.update(t.name().equals("app_settings") ? "delete from app_settings where setting_key <> 'language'" : "delete from " + t.name());
+        }
+        for (Table t : TABLES) if (t.hasId()) jdbc.execute("alter table " + t.name() + " alter column id restart with 1");
     }
 
     static boolean looksLikeJson(String content) {

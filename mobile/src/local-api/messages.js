@@ -66,6 +66,19 @@ const CATALOG = new Map([
     ['Saldo pago', ['Paid balance', 'Saldo pagado']],
     ['De', ['From', 'De']],
     ['Para', ['To', 'A']],
+    // widgets da tela inicial
+    ['Aplicativo bloqueado por senha. Widgets desativados.', ['App locked by password. Widgets disabled.', 'Aplicación bloqueada por contraseña. Widgets desactivados.']],
+    ['Item não encontrado. Toque para abrir o app.', ['Item not found. Tap to open the app.', 'Elemento no encontrado. Toca para abrir la app.']],
+    ['Novo lançamento', ['New entry', 'Nuevo movimiento']],
+    ['Abra o app para ativar o widget.', ['Open the app to activate the widget.', 'Abre la app para activar el widget.']],
+    ['Saldo total', ['Total balance', 'Saldo total']],
+    ['dentro de {0}', ['inside {0}', 'dentro de {0}']],
+    ['Orçamento', ['Budget', 'Presupuesto']],
+    ['Geral', ['Overall', 'General']],
+    ['restante de {0}', ['left of {0}', 'restante de {0}']],
+    ['Caixinha', ['Pot', 'Hucha']],
+    ['guardado de {0}', ['saved of {0}', 'guardado de {0}']],
+    ['guardado', ['saved', 'guardado']],
     // avisos agendados no celular
     ['{0} vence em {1}', ['{0} is due in {1}', '{0} vence en {1}']]
 ]);

@@ -313,5 +313,17 @@ const V4 = `
 alter table pots add column account_id integer references accounts (id) on delete set null;
 alter table expenses add column adjustment integer default 0;`;
 
-export const MIGRATIONS = [V1, syncSchema(), V3, V4];
+/**
+ * Copias completas dos dados que foram para a lixeira com "Limpar tudo". Ficam so aqui (nao entram no backup nem no sync):
+ * restaurar uma delas devolve todos os dados daquele momento.
+ */
+const V5 = `
+create table trash_snapshots (
+    id integer primary key autoincrement,
+    created_at text not null,
+    summary text not null,
+    payload text not null
+);`;
+
+export const MIGRATIONS = [V1, syncSchema(), V3, V4, V5];
 export const SCHEMA_VERSION = MIGRATIONS.length;

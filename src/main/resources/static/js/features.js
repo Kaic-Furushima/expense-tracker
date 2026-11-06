@@ -310,6 +310,22 @@ function securityCard() {
         </div>`;
 }
 
+/* ---------- Home-screen widgets (Android app only) ----------
+   The widgets cannot ask for the password, so with a password set they only show a notice, unless this is turned on. */
+function widgetsCard() {
+    const w = window.nativeWidgets;
+    if (!w) return '';
+    const locked = state.security && state.security.passwordSet;
+    return `<h2 class="section-title">Widgets</h2>
+        <div class="card stack-tight">
+            <p class="small muted">Para adicionar: segure um espaço vazio da tela inicial, toque em Widgets e escolha o Expense Tracker. Há o de saldo (total ou de uma conta) e o de orçamento ou caixinha, cada um com ou sem o botão “+” para lançar.</p>
+            <label class="switch-row"><input type="checkbox" id="widgets-pw" ${w.withPassword() ? 'checked' : ''}>
+                <span><strong>Mostrar os widgets mesmo com senha</strong>
+                ${info('Desligado: com senha no app, os widgets só mostram “Aplicativo bloqueado por senha. Widgets desativados.”. Ligado: eles mostram os valores sem pedir a senha, e ela é pedida ao tocar no “+” ou no widget para abrir o app.')}</span></label>
+            ${locked ? '' : '<p class="small muted">Você não tem senha no app, então os widgets já funcionam. Esta opção só vale se você definir uma senha.</p>'}
+        </div>`;
+}
+
 /** Sets, changes or removes the password. Changing or removing it needs the current one. */
 function openPasswordSheet(mode) {
     const title = {set: 'Definir senha', change: 'Alterar senha', remove: 'Remover senha'}[mode];
@@ -420,6 +436,7 @@ function renderMoreMenu() {
                 <span><strong>Mostrar dicas</strong>${info('Explicações curtas pelas telas. Cada dica aparece uma vez, com o botão “Entendi” para não voltar. Vale só neste aparelho.')}</span></label>
         </div>
         ${securityCard()}
+        ${widgetsCard()}
         <h2 class="section-title">Aparência</h2>
         <div class="card"><div class="chips">
             ${[['light', 'sun', 'Claro'], ['dark', 'moon', 'Escuro']].map(([v, i, l]) =>
@@ -433,7 +450,7 @@ function renderMoreMenu() {
             ${state.sync && state.sync.available ? menuRow('sync', 'repeat', 'Sincronização', state.sync.configured ? `Conectado · última: ${syncWhen(state.sync.lastSyncAt)}` : 'Manter computador e celular com os mesmos dados') : ''}
             <a class="row" id="export-csv" href="/api/export.csv" download style="text-decoration:none;color:inherit"><span class="avatar" style="background:var(--surface-2)">${ico('download')}</span><span class="grow title">Exportar para planilha (CSV)</span></a>
             <button class="row" id="demo"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Carregar dados de exemplo</span></button>
-            <button class="row" id="wipe"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Mover todos os lançamentos para a lixeira</span></button>
+            <button class="row" id="wipe"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Limpar tudo (mover para a lixeira)</span></button>
         </div>
         <h2 class="section-title">Sobre</h2>
         <div class="card about" id="about-box">
@@ -489,6 +506,16 @@ function renderMoreMenu() {
     if (logout) logout.onclick = async () => {
         try { await api('/api/auth/logout', {method: 'POST'}); location.reload(); } catch (e) { toast(e.message); }
     };
+    const widgetsPw = $('#widgets-pw');
+    if (widgetsPw) widgetsPw.onchange = async () => {
+        if (widgetsPw.checked && state.security && state.security.passwordSet
+            && !await confirmDialog('Com isso, os saldos aparecem na tela inicial sem pedir a senha do app. Quem pegar o celular desbloqueado poderá vê-los. Ligar mesmo assim?', {okLabel: 'Ligar'})) {
+            widgetsPw.checked = false;
+            return;
+        }
+        await window.nativeWidgets.setWithPassword(widgetsPw.checked);
+        toast(widgetsPw.checked ? 'Widgets ligados mesmo com senha' : 'Widgets desligados quando há senha');
+    };
     loadAbout();
     $('#export-csv').onclick = async e => {
         if (!window.desktop && !window.nativeFiles) return; // browsers handle the download attribute themselves
@@ -502,11 +529,11 @@ function renderMoreMenu() {
         }
     };
     $('#demo').onclick = async () => {
-        if (!await confirmDialog('Adicionar lançamentos de exemplo dos últimos 3 meses?', {okLabel: 'Adicionar', danger: false})) return;
+        if (!await confirmDialog('Adicionar dados de exemplo? São 6 meses de lançamentos em várias contas e cartão, parcelados, orçamentos, pagamentos recorrentes, caixinhas, desejos e modelos. Para apagar tudo depois, use “Limpar tudo”.', {okLabel: 'Adicionar', danger: false})) return;
         await run(() => api('/api/demo-data', {method: 'POST'}), 'Dados de exemplo carregados');
     };
     $('#wipe').onclick = async () => {
-        if (!await confirmDialog('Mover TODOS os lançamentos e transferências para a lixeira? Contas, categorias e orçamentos são mantidos, e dá para restaurar em Mais → Lixeira por 30 dias.', {okLabel: 'Mover tudo'})) return;
+        if (!await confirmDialog('Mover TUDO para a lixeira? Lançamentos, transferências, contas, categorias, orçamentos, pagamentos recorrentes, caixinhas, desejos e modelos saem do app, que volta ao estado de recém-instalado. Uma cópia completa fica em Mais → Lixeira por 30 dias, e dá para restaurar tudo de uma vez.', {okLabel: 'Limpar tudo'})) return;
         await run(() => api('/api/data', {method: 'DELETE'}), 'Tudo foi para a lixeira');
     };
 }
@@ -1080,7 +1107,12 @@ async function renderTrashPage() {
     if (state.tab !== 'more' || state.sub !== 'trash') return; // navigated away while loading
     $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}
         ${tip('trash', `O que você exclui vem para cá e fica guardado por 30 dias; depois é apagado de vez. Restaurar traz o item de volta com a mesma data e conta.`)}
-        ${items.length ? `<div class="list">${items.map(i => `<div class="row" data-trash="${i.kind}:${i.id}">
+        ${items.length ? `<div class="list">${items.map(i => i.kind === 'EVERYTHING' ? `<div class="row" data-trash="${i.kind}:${i.id}">
+            <span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
+            <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${i.detail.split(' · ').map(part => `<span>${esc(part)}</span>`).join(' · ')}</span><span class="small muted">Limpo em ${dateTimeBr(i.deletedAt)}</span></span>
+            <span class="row-actions"><button class="chip" data-restore="${i.kind}:${i.id}">Restaurar</button>
+            <button class="icon-btn small" data-purge="${i.kind}:${i.id}" aria-label="Excluir de vez">${ico('trash')}</button></span></div>`
+            : `<div class="row" data-trash="${i.kind}:${i.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico(i.kind === 'TRANSFER' ? 'transfer' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${esc(i.detail)} · ${isoToBr(i.date)} · excluído em ${dateTimeBr(i.deletedAt)}</span></span>
             <span class="amount">${money(i.amount)}</span>
@@ -1092,6 +1124,7 @@ async function renderTrashPage() {
     const refresh = async message => { await loadAll(); toast(message); };
     $$('[data-restore]').forEach(b => b.onclick = async () => {
         const [kind, id] = b.dataset.restore.split(':');
+        if (kind === 'EVERYTHING' && !await confirmDialog('Voltar todos os dados para como estavam nesta cópia? Tudo o que está no app agora é substituído (e também vai para a lixeira, para você poder desfazer).', {okLabel: 'Restaurar tudo', danger: false})) return;
         try { await api(`/trash/${kind}/${id}/restore`, {method: 'POST'}); await refresh('Restaurado'); } catch (e) { toast(e.message); }
     });
     $$('[data-purge]').forEach(b => b.onclick = async () => {

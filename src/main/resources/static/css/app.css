@@ -136,6 +136,8 @@ h1, h2, h3, p { margin: 0; }
 .hero { background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #000)); color: var(--on-primary); }
 .hero .label { opacity: .85; font-size: .85rem; }
 .hero .balance { font-size: 2.1rem; font-weight: 800; letter-spacing: -.02em; margin: 2px 0 14px; }
+.hero .balance.has-sub { margin-bottom: 2px; }
+.hero-sub { font-size: .82rem; opacity: .85; margin-bottom: 14px; }
 .hero-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .hero-pill { flex: 1; background: rgba(255, 255, 255, .16); border-radius: 14px; padding: 10px 12px; }
 .hero-pill .v { font-weight: 700; font-size: 1.02rem; }
@@ -323,7 +325,8 @@ select { appearance: auto; }
 .tag.late { background: var(--expense); color: #fff; }
 .tag.wait { background: var(--warn); color: #000; }
 .row.is-pending .title { font-style: italic; }
-.hero-note.forecast { margin-top: 4px; opacity: .95; }
+.hero-note.forecast { opacity: .95; }
+.hero-note.forecast + .hero-note.forecast { margin-top: 4px; }
 .hero-note.forecast span { opacity: .8; }
 .toast.has-action { pointer-events: auto; display: flex; gap: 14px; align-items: center; }
 .toast-action { color: var(--bg); font-weight: 800; text-decoration: underline; padding: 0 2px; }

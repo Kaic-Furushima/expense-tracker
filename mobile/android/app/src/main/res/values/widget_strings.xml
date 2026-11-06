@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_balance_label">Saldo</string>
+    <string name="widget_progress_label">Orçamento ou caixinha</string>
+    <string name="widget_balance_description">Saldo total ou de uma conta, com botão opcional para lançar.</string>
+    <string name="widget_progress_description">Quanto resta do orçamento ou quanto já foi guardado na caixinha, com botão opcional para lançar.</string>
+    <string name="widget_open_app">Abra o app para ativar o widget.</string>
+    <string name="widget_add_description">Novo lançamento</string>
+    <string name="widget_config_choose_balance">Mostrar o saldo de</string>
+    <string name="widget_config_choose_progress">Mostrar</string>
+    <string name="widget_config_button">Mostrar o botão “+” para lançar</string>
+    <string name="widget_config_done">Adicionar widget</string>
+    <string name="widget_config_waiting">Abra o app uma vez para listar as opções. Por enquanto o widget mostrará o padrão.</string>
+    <string name="widget_default_balance">Saldo total</string>
+    <string name="widget_default_progress">Orçamento · Geral</string>
+</resources>

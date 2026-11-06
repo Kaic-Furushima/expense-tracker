@@ -448,12 +448,20 @@ async function loadAll({keepScroll = true} = {}) {
         render();
         window.scrollTo({top: keepScroll ? scrollY : 0});
         loadReminders();
+        consumeWidgetAction();
     } catch (e) {
         if (e.locked) return; // the sign-in form is on the screen
         $('#view').innerHTML = `<div class="card empty"><div class="big">${ico('wifi-off')}</div>Não foi possível carregar os dados.<br><span class="small">${esc(e.message)}</span><br><br><button class="btn primary" id="retry">Tentar de novo</button></div>`;
         $('#retry').onclick = loadAll;
     }
 }
+
+/** Android: the "+" button of a home-screen widget asks for a new entry; it runs once the app is open (after the password, if any). */
+function consumeWidgetAction() {
+    if (!window.nativeWidgets || document.body.classList.contains('locked') || !state.categories.length) return;
+    if (window.nativeWidgets.takeAction() === 'new') openTransactionSheet(null);
+}
+window.consumeWidgetAction = consumeWidgetAction;
 
 /* ---------- Views ---------- */
 function render() {
@@ -554,35 +562,44 @@ function donut(groups, total) {
     </svg>`;
 }
 
+/** The big number on the home screen: what is in the accounts right now (or in the chosen account), not the month's result. */
+function homeTotal() {
+    const picked = state.accountFilter ? accountById(state.accountFilter) : null;
+    if (picked) return {label: `Saldo de ${esc(picked.name)}`, value: Number(picked.balance), sub: ''};
+    const value = activeAccounts().reduce((sum, a) => sum + Number(a.balance), 0);
+    return {label: 'Saldo total', value, sub: ''};
+}
+
 function renderHome() {
     const s = state.summary;
-    const spent = Number(s.expense), prev = Number(s.previousExpense);
-    let note = 'Sem dados do mês anterior para comparar.';
-    if (prev > 0) {
-        const diff = ((spent - prev) / prev) * 100;
-        note = diff === 0 ? 'Gastos iguais aos do mês anterior.'
-            : `Gastos ${Math.abs(diff).toFixed(0)}% ${diff > 0 ? 'maiores' : 'menores'} que no mês anterior.`;
-    }
+    const total = homeTotal();
+    const spent = Number(s.expense);
     const groups = rootGroups(s.categories, spent);
     const maxTrend = Math.max(1, ...s.trend.flatMap(t => [Number(t.income), Number(t.expense)]));
     const hasForecast = Number(s.pendingExpense) > 0 || Number(s.pendingIncome) > 0;
+    // What is still to pay / to receive this month: it gives the profit expected for the month and, for the current month,
+    // the total that will be left in the accounts once it is all settled.
+    const pending = `<span>(${Number(s.pendingExpense) > 0 ? `a pagar ${money(s.pendingExpense)}` : ''}${Number(s.pendingExpense) > 0 && Number(s.pendingIncome) > 0 ? ' · ' : ''}${Number(s.pendingIncome) > 0 ? `a receber ${money(s.pendingIncome)}` : ''})</span>`;
+    const thisMonth = state.month === todayIso().slice(0, 7);
+    const leftTotal = total.value + Number(s.pendingIncome) - Number(s.pendingExpense);
     const forecast = hasForecast
-        ? `<div class="hero-note forecast">Previsto no fim do mês: <strong>${money(s.projectedBalance)}</strong>
-            <span>(${Number(s.pendingExpense) > 0 ? `a pagar ${money(s.pendingExpense)}` : ''}${Number(s.pendingExpense) > 0 && Number(s.pendingIncome) > 0 ? ' · ' : ''}${Number(s.pendingIncome) > 0 ? `a receber ${money(s.pendingIncome)}` : ''})</span></div>`
+        ? `${thisMonth ? `<div class="hero-note forecast">Previsto no fim do mês: <strong>${money(leftTotal)}</strong> ${pending}</div>` : ''}
+        <div class="hero-note forecast">Lucro previsto do mês: <strong>${money(s.projectedBalance)}</strong> ${thisMonth ? '' : pending}</div>`
         : '';
     const latest = [...state.transactions].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 5);
 
     $('#view').innerHTML = `<div class="home-grid"><div class="stack home-main">
         ${welcomeCard()}
         <div class="card hero">
-            <div class="label">Saldo do mês</div>
-            <div class="balance">${money(s.balance)}</div>
+            <div class="label">${total.label}</div>
+            <div class="balance ${total.sub ? 'has-sub' : ''}">${money(total.value)}</div>
+            ${total.sub ? `<div class="hero-sub">${total.sub}</div>` : ''}
             <div class="hero-row">
                 <div class="hero-pill"><div class="label">${ico('arrow-up')} Receitas</div><div class="v">${money(s.income)}</div></div>
                 <div class="hero-pill"><div class="label">${ico('arrow-down')} Despesas</div><div class="v">${money(s.expense)}</div></div>
+                <div class="hero-pill wide" title="Receitas pagas menos despesas pagas deste mês (mais as correções de saldo). Não inclui o que já estava nas contas antes."><div class="label">Resultado do mês</div><div class="v">${Number(s.balance) > 0 ? '+ ' : Number(s.balance) < 0 ? '− ' : ''}${money(Math.abs(Number(s.balance)))}</div></div>
                 ${Number(s.adjustment) ? `<div class="hero-pill wide" title="Correção de saldo: a diferença entre o saldo do app e o saldo real, anotada à parte (não é receita nem despesa)"><div class="label">${ico('pencil')} Correções</div><div class="v">${Number(s.adjustment) > 0 ? '+ ' : '− '}${money(Math.abs(Number(s.adjustment)))}</div></div>` : ''}
             </div>
-            <div class="hero-note">${esc(note)}</div>
             ${forecast}
         </div>
         <div id="upcoming-box"></div>
@@ -1094,6 +1111,7 @@ function openTransactionSheet(item, prefill) {
     let mode = isTransfer ? 'TRANSFER' : (src ? src.type : 'EXPENSE');
     let status = item && !isTransfer ? item.status : 'PAID';
     let categoryId = src && !isTransfer ? src.categoryId : null;
+    let repeat = false; // "Repetir todo mês": the entry becomes a recurring payment instead of a one-off
     const date = item ? item.date : (monthOf(todayIso()) === state.month ? todayIso() : `${state.month}-01`);
     const fromDefault = isTransfer ? item.fromAccountId : defaultAccountId();
     const toDefault = isTransfer ? item.toAccountId : (() => {
@@ -1124,7 +1142,14 @@ function openTransactionSheet(item, prefill) {
             </div>
             <div data-for="transfer">${tip('transfer', `Mover dinheiro entre contas não é receita nem despesa. Para registrar um investimento, transfira para a conta (ou parte dela) onde ele fica guardado.`)}</div>
             ${dateField('f-date', date, 'Data')}
-            <div class="field" data-for="tx"><label>Situação</label>
+            <div data-for="repeat" hidden>
+                <label class="switch-row"><input type="checkbox" id="f-repeat"><span>Repetir todo mês${info('Cria um pagamento recorrente: ele se repete sozinho todo mês, no mesmo dia, sem você lançar de novo. Depois dá para ver, pausar ou editar em Mais → Pagamentos recorrentes. Se o desconto automático estiver ligado nas configurações, ele é pago no dia do vencimento; senão fica em “A pagar” até você confirmar.')}</span></label>
+                <div id="f-repeat-opts" hidden>
+                    <div class="field"><label for="f-repeat-end">Termina em</label><select id="f-repeat-end"></select></div>
+                    <span class="small muted" id="f-repeat-hint"></span>
+                </div>
+            </div>
+            <div class="field" data-for="tx" data-once><label>Situação</label>
                 <div class="chips" id="f-status"><button type="button" class="chip" data-status="PAID" id="f-paid-chip">Pago</button><button type="button" class="chip" data-status="PENDING" id="f-pending-chip">A pagar</button></div></div>
             <div class="field" data-for="installments"><label for="f-inst">Parcelas</label>
                 <input id="f-inst" inputmode="numeric" maxlength="2" value="1" autocomplete="off">
@@ -1137,9 +1162,9 @@ function openTransactionSheet(item, prefill) {
                 </div></div>
             ${editing && !isTransfer && item.installmentTotal ? `<p class="small muted audit">Parcela ${item.installmentNumber} de ${item.installmentTotal} desta compra. Alterar aqui muda só esta parcela.</p>` : ''}
             <div class="field" data-for="tx"><label for="f-method">Forma de pagamento</label><select id="f-method" data-create="method">${options(state.methods, src?.paymentMethodId, {none: '—'})}</select></div>
-            <div class="field" data-for="tx"><label for="f-tags">Tags</label><input id="f-tags" maxlength="200" placeholder="#viagem, trabalho" autocomplete="off" value="${esc((src?.tags || []).map(t => '#' + t).join(' '))}">
+            <div class="field" data-for="tx" data-once><label for="f-tags">Tags</label><input id="f-tags" maxlength="200" placeholder="#viagem, trabalho" autocomplete="off" value="${esc((src?.tags || []).map(t => '#' + t).join(' '))}">
                 ${suggestions.length ? `<span class="tag-suggest">${suggestions.map(t => `<button type="button" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}</span>` : ''}</div>
-            <div class="field" data-for="tx"><label for="f-desc">Observação</label><textarea id="f-desc" rows="2" maxlength="255">${esc(src?.description && !isTransfer ? src.description : '')}</textarea></div>
+            <div class="field" data-for="tx" data-once><label for="f-desc">Observação</label><textarea id="f-desc" rows="2" maxlength="255">${esc(src?.description && !isTransfer ? src.description : '')}</textarea></div>
             ${editing && !isTransfer ? '<div class="field" data-for="tx"><label>Comprovantes</label><div id="f-attachments"></div></div>' : ''}
             ${editing ? `<p class="small muted audit">Adicionado em ${esc(dateTimeBr(item.createdAt))}${item.updatedAt && item.updatedAt.slice(0, 16) !== (item.createdAt || '').slice(0, 16) ? ` · alterado em ${esc(dateTimeBr(item.updatedAt))}` : ''}</p>` : ''}
             <div class="form-actions sub-actions" data-for="tx">
@@ -1160,7 +1185,10 @@ function openTransactionSheet(item, prefill) {
         const transfer = mode === 'TRANSFER';
         $$('[data-for="tx"]', sheet).forEach(el => { el.hidden = transfer; });
         $$('[data-for="transfer"]', sheet).forEach(el => { el.hidden = !transfer; });
-        $$('[data-for="installments"]', sheet).forEach(el => { el.hidden = editing || mode !== 'EXPENSE'; });
+        $$('[data-for="installments"]', sheet).forEach(el => { el.hidden = editing || mode !== 'EXPENSE' || repeat; });
+        $$('[data-for="repeat"]', sheet).forEach(el => { el.hidden = editing || transfer; });
+        $$('[data-once]', sheet).forEach(el => { el.hidden = transfer || repeat; }); // a recurring payment has no status, tags or note of its own
+        $('#f-repeat-opts', sheet).hidden = !repeat;
         $('#f-title', sheet).textContent = editing ? (transfer ? 'Editar transferência' : 'Editar lançamento') : (transfer ? 'Nova transferência' : 'Novo lançamento');
         $('#f-name-label', sheet).textContent = transfer ? 'Descrição (opcional)' : 'Descrição';
         $('#f-name', sheet).placeholder = transfer ? 'Ex.: Aporte na caixinha' : 'Ex.: Almoço';
@@ -1175,7 +1203,7 @@ function openTransactionSheet(item, prefill) {
     const paintStatus = () => {
         $$('#f-status .chip', sheet).forEach(b => b.classList.toggle('active', b.dataset.status === status));
         const label = $('label[for="f-date"]', sheet);
-        if (label) label.textContent = status === 'PENDING' && mode !== 'TRANSFER' ? 'Vencimento' : 'Data';
+        if (label) label.textContent = repeat ? 'Começa em' : status === 'PENDING' && mode !== 'TRANSFER' ? 'Vencimento' : 'Data';
     };
     const paintCats = () => {
         const kind = kindOf(mode);
@@ -1208,6 +1236,27 @@ function openTransactionSheet(item, prefill) {
         };
     };
     $$('.seg button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); paintStatus(); });
+    /** "Repetir todo mês": the date gives the day of the month and the first month; the end month list starts there. */
+    function paintRepeat() {
+        const first = (dateValue() || date).slice(0, 7);
+        const end = $('#f-repeat-end', sheet);
+        const keep = end.value;
+        end.innerHTML = monthOptions(monthRange(first, 61), keep && keep >= first ? keep : '', {none: 'Sem data final'});
+        $('#f-repeat-hint', sheet).textContent = T('Repete todo dia {} de cada mês, a partir de {}.')
+            .replace('{}', Number((dateValue() || date).slice(8))).replace('{}', monthLabel(first));
+    }
+    $('#f-repeat', sheet).onchange = e => {
+        repeat = e.target.checked;
+        if (repeat) {
+            $('#f-inst', sheet).value = '1'; // installments and repeating do not mix
+            if (typeof refreshPlan === 'function') refreshPlan();
+            paintRepeat();
+        }
+        paintMode();
+        paintStatus();
+    };
+    $('#f-date', sheet).addEventListener('input', () => { if (repeat) paintRepeat(); });
+    $('#f-date', sheet).addEventListener('change', () => { if (repeat) paintRepeat(); });
     $$('#f-status .chip', sheet).forEach(b => b.onclick = () => { status = b.dataset.status; paintStatus(); if (installments() > 1) refreshPlan(); });
     $$('[data-tag]', sheet).forEach(b => b.onclick = () => {
         const input = $('#f-tags', sheet);
@@ -1445,6 +1494,14 @@ function openTransactionSheet(item, prefill) {
                 editing ? 'Transferência atualizada' : 'Transferência salva');
         }
         if (!name) return toast('Informe uma descrição.');
+        if (repeat && !editing) {
+            const first = dateValue();
+            const rule = {name, type: mode, amount, variableAmount: false, dayOfMonth: Number(first.slice(8)),
+                accountId: Number($('#f-account', sheet).value), paymentMethodId: nextId($('#f-method', sheet).value), categoryId,
+                active: true, startMonth: first.slice(0, 7), endMonth: $('#f-repeat-end', sheet).value || null};
+            safeStorage.set('lastAccount', String(rule.accountId));
+            return run(() => api('/recurring', {method: 'POST', body: rule}), 'Pagamento recorrente criado');
+        }
         const body = {
             name, amount, type: mode, categoryId, status,
             date: dateValue(),

@@ -10,10 +10,13 @@ const pc = async url => (await fetch(PC + url, {headers: {Origin: PC}})).json();
 const m = url => mobile.handle('GET', url).body;
 const month = new Date().toISOString().slice(0, 7);
 const strip = v => JSON.parse(JSON.stringify(v, (k, x) => (['id', 'createdAt', 'updatedAt', 'accountId', 'categoryId', 'potId', 'paymentMethodId', 'recurringId', 'expenseId', 'categoryParentId', 'parentId'].includes(k) ? undefined : x)));
+// a ordem das chaves do JSON e a ordem de listas sem ordenacao propria nao importam
+const canon = v => (Array.isArray(v) ? v.map(canon).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);
 let bad = 0;
 for (const url of ['/accounts', '/categories', '/payment-methods', '/tags', '/budgets', '/budgets/total', '/recurring', '/pots', '/wishes', '/templates', '/transfers',
     `/expenses?size=500`, `/api/summary?month=${month}`, `/recurring/occurrences?month=${month}`, '/api/settings']) {
-    const a = strip(await pc(url)), b = strip(m(url));
+    const a = canon(strip(await pc(url))), b = canon(strip(m(url)));
     const sa = JSON.stringify(a), sb = JSON.stringify(b);
     if (sa !== sb) {
         bad++;

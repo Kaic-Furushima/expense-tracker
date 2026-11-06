@@ -27,31 +27,49 @@ describe('dados de exemplo', () => {
         assert.equal(javaHash('polygenelubricants'), -2147483648); // estoura o int de 32 bits (Integer.MIN_VALUE)
     });
 
-    it('cria contas, a caixinha dentro do Nubank, 3 meses de lancamentos, transferencias e orcamentos', () => {
+    it('cria contas (com um cartao), a caixinha dentro do Nubank, 6 meses de lancamentos, transferencias e orcamentos', () => {
         load();
         const accounts = ok('GET', '/accounts');
-        assert.deepEqual(accounts.map(a => a.name).sort(), ['Bradesco', 'Caixinha Nubank', 'Conta principal', 'Nubank', 'Santander']);
+        assert.deepEqual(accounts.map(a => a.name).sort(), ['Bradesco', 'Caixinha Nubank', 'Carteira', 'Cartão Nubank', 'Conta principal', 'Nubank', 'Santander']);
+        const card = accounts.find(a => a.name === 'Cartão Nubank');
+        assert.deepEqual([card.type, card.closingDay, card.dueDay], ['CREDIT_CARD', 25, 5]);
+        assert.equal(accounts.find(a => a.name === 'Carteira').type, 'WALLET');
         const caixinha = accounts.find(a => a.name === 'Caixinha Nubank');
-        assert.deepEqual([caixinha.type, caixinha.parentName, caixinha.balance, caixinha.color], ['INVESTMENT', 'Nubank', 1200, '#43A047']);
+        assert.deepEqual([caixinha.type, caixinha.parentName, caixinha.balance, caixinha.color], ['INVESTMENT', 'Nubank', 2489.1, '#43A047']);
         assert.equal(accounts.find(a => a.name === 'Santander').color, '#E53935');
 
         const all = ok('GET', '/expenses?sort=date,asc');
-        assert.equal(all.length, 22); // 7 por mes em 3 meses + a conta de luz a pagar
-        assert.equal(ok('GET', '/transfers?month=2026-05').length, 1);
-        assert.equal(ok('GET', '/transfers?month=2026-03').length, 1);
+        assert.equal(all.length, 122); // 6 meses de lancamentos + as parcelas do notebook (10) e da geladeira (12) + 2 a pagar/receber
+        assert.equal(ok('GET', '/transfers?month=2026-05').length, 2); // aporte na caixinha e saque para a carteira
+        assert.equal(ok('GET', '/transfers?month=2026-04').length, 1);
         const mercado = all.filter(e => e.name === 'Mercado').map(e => [e.date, e.amount]);
-        assert.deepEqual(mercado, [['2026-03-03', 430.9], ['2026-04-03', 405.9], ['2026-05-03', 380.9]]);
-        assert.deepEqual(ok('GET', '/budgets?month=2026-05').map(b => [b.categoryId, b.amount]).sort((a, b) => a[1] - b[1]).map(x => x[1]), [150, 500, 700]);
+        assert.deepEqual(mercado.slice(-4), [['2026-04-03', 405.9], ['2026-04-18', 157.6], ['2026-05-03', 380.9], ['2026-05-15', 150.6]]); // 2a compra do dia 18, limitada a hoje
+        assert.deepEqual(ok('GET', '/budgets?month=2026-05').map(b => b.amount).sort((a, b) => a - b), [120, 150, 150, 250, 300, 500, 700]);
+    });
+
+    it('parcelados, tags, recorrentes, caixinhas, desejos e modelos', () => {
+        load();
+        const notebook = ok('GET', '/expenses?sort=date,asc').filter(e => e.name === 'Notebook');
+        assert.deepEqual([notebook.length, notebook[0].date, notebook[0].amount, notebook[0].accountName, notebook[9].date], [10, '2026-02-10', 450, 'Cartão Nubank', '2026-11-10']);
+        assert.equal(ok('GET', '/expenses').filter(e => e.name === 'Geladeira').length, 12);
+        assert.deepEqual(ok('GET', '/tags'), ['presente', 'trabalho', 'viagem']);
+        assert.deepEqual(ok('GET', '/expenses?tag=viagem').map(e => e.name).sort(), ['Hospedagem', 'Passagem aérea']);
+        assert.deepEqual(ok('GET', '/recurring').map(r => r.name), ['Aluguel recebido', 'Conta de água', 'Plano de saúde', 'Seguro do carro']);
+        assert.equal(ok('GET', '/recurring').find(r => r.name === 'Conta de água').variableAmount, true);
+        const pots = ok('GET', '/pots');
+        assert.deepEqual(pots.map(p => [p.name, p.balance, p.accountName]), [['Equipamentos', 600, null], ['Reserva de emergência', 1800, 'Santander'], ['Viagem', 1700, 'Nubank']]);
+        assert.deepEqual(ok('GET', '/wishes').map(w => w.name), ['Bicicleta', 'Cadeira ergonômica', 'Fone de ouvido']);
+        assert.deepEqual(ok('GET', '/templates').map(t => t.name), ['Almoço', 'Café', 'Uber']);
     });
 
     it('no mes atual so vai ate hoje; a conta de luz fica a pagar no dia 28', () => {
         load();
         const may = ok('GET', '/expenses?month=2026-05');
         assert.ok(may.every(e => e.date <= '2026-05-28'));
-        assert.equal(may.filter(e => e.status === 'PAID').every(e => e.date <= '2026-05-15'), true);
         assert.equal(may.find(e => e.name === 'Transporte por app').date, '2026-05-15'); // dia 17 limitado a hoje
-        const luz = ok('GET', '/expenses?status=PENDING');
-        assert.deepEqual(luz.map(e => [e.name, e.date, e.amount, e.paymentMethodId, e.accountName]), [['Conta de luz', '2026-05-28', 142.3, null, 'Santander']]);
+        assert.ok(may.filter(e => e.status === 'PAID' && !e.installmentTotal).every(e => e.date <= '2026-05-15'));
+        const pending = ok('GET', '/expenses?status=PENDING').map(e => [e.name, e.date, e.amount, e.paymentMethodId, e.accountName]).sort();
+        assert.deepEqual(pending, [['Conta de luz', '2026-05-28', 142.3, null, 'Santander'], ['Freelance a receber', '2026-05-27', 600, null, 'Nubank']]);
     });
 
     it('formas de pagamento, categorias e saldo do painel', () => {
@@ -59,11 +77,10 @@ describe('dados de exemplo', () => {
         const salary = ok('GET', '/expenses?q=Sal%C3%A1rio&sort=date,asc')[0];
         assert.deepEqual([salary.type, salary.amount, salary.accountName, salary.paymentMethodName, salary.categoryName], ['INCOME', 5200, 'Santander', 'Transferência', 'Salário']);
         const s = ok('GET', '/api/summary?month=2026-04');
-        assert.equal(s.income, 5200);
-        assert.equal(s.expense, 2160.5); // 1450 + 405,90 + 99,90 + 55,90 + 100,50 + 48,30
+        assert.equal(s.income, 6063.35); // salario + freelance (850) + rendimentos da caixinha (13,35)
+        assert.equal(s.expense, 3365.8);
         assert.ok(s.categories.find(c => c.name === 'Mercado').budget === 700);
-        // 3 salarios (15.600) - 3 alugueis (4.350) - 3 aportes na caixinha (1.200) - transportes (54,30 + 48,30 + 42,30)
-        assert.equal(ok('GET', '/accounts').find(a => a.name === 'Santander').balance, 9905.1);
+        assert.equal(ok('GET', '/accounts').find(a => a.name === 'Santander').balance, 22121.2);
     });
 
     it('rodar de novo nao duplica nada', () => {
@@ -75,13 +92,13 @@ describe('dados de exemplo', () => {
         assert.deepEqual(snapshot(), first);
     });
 
-    it('depois de limpar tudo, carregar de novo traz os lancamentos de volta (a lixeira nao conta)', () => {
+    it('depois de limpar tudo, carregar de novo traz tudo de volta (a copia continua na lixeira)', () => {
         load();
         ok('DELETE', '/api/data');
         assert.equal(ok('GET', '/expenses').length, 0);
         load();
-        assert.equal(ok('GET', '/expenses').length, 22);
-        assert.equal(ok('GET', '/trash').length, 22 + 3); // os antigos continuam na lixeira
+        assert.equal(ok('GET', '/expenses').length, 122);
+        assert.deepEqual(ok('GET', '/trash').map(t => t.kind), ['EVERYTHING']);
     });
 
     it('nao mexe no que a pessoa ja tinha', () => {
@@ -106,6 +123,8 @@ describe('dados de exemplo', () => {
     it('janeiro: os meses anteriores viram o ano', () => {
         api = createApi(new SQL.Database(), {clock: () => new Date(2027, 0, 20, 12), newId: () => `d-${++n}`});
         load();
-        assert.deepEqual([...new Set(ok('GET', '/expenses').map(e => e.date.slice(0, 7)))].sort(), ['2026-11', '2026-12', '2027-01']);
+        const months = [...new Set(ok('GET', '/expenses').map(e => e.date.slice(0, 7)))].sort();
+        assert.equal(months[0], '2026-08'); // 6 meses: de agosto de 2026 a janeiro de 2027
+        assert.ok(months.includes('2026-12') && months.includes('2027-01'));
     });
 });

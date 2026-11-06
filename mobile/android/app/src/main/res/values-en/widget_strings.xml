@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_balance_label">Balance</string>
+    <string name="widget_progress_label">Budget or pot</string>
+    <string name="widget_balance_description">Total balance or one account, with an optional button to add an entry.</string>
+    <string name="widget_progress_description">How much of a budget is left or how much a pot has saved, with an optional button to add an entry.</string>
+    <string name="widget_open_app">Open the app to activate the widget.</string>
+    <string name="widget_add_description">New entry</string>
+    <string name="widget_config_choose_balance">Show the balance of</string>
+    <string name="widget_config_choose_progress">Show</string>
+    <string name="widget_config_button">Show the “+” button to add an entry</string>
+    <string name="widget_config_done">Add widget</string>
+    <string name="widget_config_waiting">Open the app once to list the options. For now the widget will show the default.</string>
+    <string name="widget_default_balance">Total balance</string>
+    <string name="widget_default_progress">Budget · Overall</string>
+</resources>

@@ -177,13 +177,6 @@ public class ApiController {
         demoDataService.load();
     }
 
-    /** Sends every transaction and transfer to the trash. */
-    @DeleteMapping("/data")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void clearTransactions() {
-        demoDataService.clear();
-    }
-
     /**
      * Quotes a CSV cell and neutralizes spreadsheet formula injection: a cell that starts with = + - @ (or a tab or a
      * carriage return, which spreadsheets also read as the start of a formula) gets an apostrophe in front.

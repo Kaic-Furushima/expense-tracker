@@ -149,10 +149,11 @@ describe('lixeira', () => {
         assert.deepEqual(ok('GET', '/trash').map(i => i.title), ['Recente']);
     });
 
-    it('limpar tudo manda tambem as transferencias para a lixeira', () => {
+    it('limpar tudo leva lancamentos e transferencias para uma copia completa na lixeira', () => {
         transfer(5, '2026-05-02');
         spend('A', 1);
         ok('DELETE', '/api/data');
-        assert.equal(ok('GET', '/trash').length, 2);
+        assert.equal(ok('GET', '/transfers?month=2026-05').length, 0);
+        assert.deepEqual(ok('GET', '/trash').map(i => i.kind), ['EVERYTHING']);
     });
 });

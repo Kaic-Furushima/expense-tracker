@@ -25,7 +25,8 @@ public class TrashService {
 
     public static final int RETENTION_DAYS = 30;
 
-    public enum Kind { EXPENSE, TRANSFER }
+    /** EVERYTHING: the full copy of the data that "Limpar tudo" leaves (see {@link TrashSnapshotService}). */
+    public enum Kind { EXPENSE, TRANSFER, EVERYTHING }
 
     /** One thing in the trash, shown the same way whether it was a transaction or a transfer. */
     public record Item(Kind kind, Long id, String title, BigDecimal amount, LocalDate date, String detail,
@@ -34,23 +35,29 @@ public class TrashService {
 
     private final ExpenseRepository expenses;
     private final TransferRepository transfers;
+    private final TrashSnapshotService snapshots;
 
-    public TrashService(ExpenseRepository expenses, TransferRepository transfers) {
+    public TrashService(ExpenseRepository expenses, TransferRepository transfers, TrashSnapshotService snapshots) {
         this.expenses = expenses;
         this.transfers = transfers;
+        this.snapshots = snapshots;
     }
 
     public List<Item> list() {
-        return java.util.stream.Stream.concat(
+        return java.util.stream.Stream.of(
                         expenses.findTrashed().stream().map(TrashService::toItem),
-                        transfers.findTrashed().stream().map(TrashService::toItem))
+                        transfers.findTrashed().stream().map(TrashService::toItem),
+                        snapshots.list().stream().map(TrashService::toItem))
+                .flatMap(s -> s)
                 .sorted(Comparator.comparing(Item::deletedAt).reversed())
                 .toList();
     }
 
     @Transactional
     public void restore(Kind kind, Long id) {
-        if (kind == Kind.EXPENSE) {
+        if (kind == Kind.EVERYTHING) {
+            snapshots.restore(id);
+        } else if (kind == Kind.EXPENSE) {
             expenses.findTrashedById(id).orElseThrow(() -> notFound(id));
             expenses.restore(id);
         } else {
@@ -62,7 +69,9 @@ public class TrashService {
     /** Removes one item for good. */
     @Transactional
     public void purge(Kind kind, Long id) {
-        if (kind == Kind.EXPENSE) {
+        if (kind == Kind.EVERYTHING) {
+            snapshots.purge(id);
+        } else if (kind == Kind.EXPENSE) {
             expenses.findTrashedById(id).orElseThrow(() -> notFound(id));
             expenses.deleteTagLinks(id);
             expenses.purgeTrashed(id);
@@ -84,6 +93,7 @@ public class TrashService {
     }
 
     private void purgeBefore(LocalDateTime before) {
+        snapshots.purgeBefore(before);
         expenses.deleteTagLinksOfTrashedBefore(before);
         expenses.purgeTrashedBefore(before);
         transfers.purgeTrashedBefore(before);
@@ -92,6 +102,10 @@ public class TrashService {
     private static Item toItem(Expense e) {
         String detail = e.getAccount().getName() + (e.getCategory() == null ? "" : " · " + e.getCategory().getName());
         return new Item(Kind.EXPENSE, e.getId(), e.getName(), e.getAmount(), e.getDate(), detail, e.getDeletedAt());
+    }
+
+    private static Item toItem(TrashSnapshotService.Snapshot s) {
+        return new Item(Kind.EVERYTHING, s.id(), "Todos os dados", null, null, s.summary(), s.createdAt());
     }
 
     private static Item toItem(Transfer t) {
