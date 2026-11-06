@@ -345,7 +345,7 @@ public class ExpenseService {
      * built from these rows (see {@link SummaryService}).
      */
     public record Bucket(YearMonth month, boolean income, boolean paid, Long categoryId, Long accountId,
-                         BigDecimal amount, long count) {
+                         BigDecimal amount, long count, boolean adjustment) {
     }
 
     /** Totals between two months (both included), grouped by month, kind, status, category and account. */
@@ -358,7 +358,8 @@ public class ExpenseService {
                         (Long) row[4],
                         (Long) row[5],
                         row[6] == null ? BigDecimal.ZERO : (BigDecimal) row[6],
-                        ((Number) row[7]).longValue()))
+                        ((Number) row[7]).longValue(),
+                        Boolean.TRUE.equals(row[8])))
                 .toList();
     }
 

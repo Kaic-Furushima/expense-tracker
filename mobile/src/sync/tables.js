@@ -31,7 +31,8 @@ export const TABLES = {
         columns: {
             name: 'text', description: 'text', amount_cents: 'int', date: 'date', type: 'text', status: 'text',
             category_id: 'fk:categories', account_id: 'fk:accounts', payment_method_id: 'fk:payment_methods',
-            installment_group: 'text', installment_number: 'int', installment_total: 'int', created_at: 'ts', deleted_at: 'ts'
+            installment_group: 'text', installment_number: 'int', installment_total: 'int', created_at: 'ts', deleted_at: 'ts',
+            adjustment: 'int'
         },
         tags: true // tag_uuids: as etiquetas do lancamento
     },
@@ -62,7 +63,7 @@ export const TABLES = {
     pots: {
         columns: {
             name: 'text', color: 'text', icon: 'text', goal_cents: 'int', mode: 'text', monthly_cents: 'int',
-            start_month: 'text', active: 'int'
+            start_month: 'text', active: 'int', account_id: 'fk:accounts'
         },
         natural: ['name']
     },

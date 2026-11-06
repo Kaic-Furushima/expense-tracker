@@ -47,6 +47,11 @@ public class Pot extends SyncEntity {
     @Column(nullable = false)
     private boolean active = true;
 
+    /** The bank (account) where this money is kept; optional. Only a label: the money stays in the account. */
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "account_id")
+    private Account account;
+
     public YearMonth start() {
         return YearMonth.parse(startMonth);
     }

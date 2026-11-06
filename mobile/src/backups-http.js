@@ -24,7 +24,15 @@ export class MemoryBackupStore {
     async delete(name) { this.items.delete(name); }
 }
 
-export function createBackupHttp({backup, store, clock = () => new Date()}) {
+/**
+ * folder (opcional): a pasta de backups que a pessoa escolheu, fora do app. Interface:
+ * {get() -> {name} | null, pick() -> {name} | null, clear(), write(fileName, text), list() -> [nomes], remove(fileName)}.
+ * folderPrefix: comeco do nome dos arquivos deste perfil na pasta ('' no perfil principal).
+ */
+export function createBackupHttp({backup, store, clock = () => new Date(), folder = null, folderPrefix = ''}) {
+    let lastFolderError = null;
+    const ownFile = name => name.startsWith(folderPrefix) && NAME.test(name.slice(folderPrefix.length));
+
     const list = async () => (await store.list()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name < b.name ? 1 : -1));
 
     async function uniqueName(suffix) {
@@ -39,7 +47,54 @@ export function createBackupHttp({backup, store, clock = () => new Date()}) {
         const entry = {name: await uniqueName(suffix), createdAt: clock().toISOString(), sizeBytes: new Blob([content]).size, content};
         await store.put(entry);
         await prune();
-        return {name: entry.name, sizeBytes: entry.sizeBytes, createdAt: entry.createdAt};
+        const result = {name: entry.name, sizeBytes: entry.sizeBytes, createdAt: entry.createdAt};
+        const copy = await copyToFolder(entry);
+        if (copy.saved) result.folder = copy.saved;
+        if (copy.error) result.folderError = copy.error;
+        return result;
+    }
+
+    /** Copia o backup para a pasta escolhida. Nunca derruba o backup: se a pasta falhar, o erro volta junto para ser mostrado. */
+    async function copyToFolder(entry) {
+        const target = folder && await folder.get().catch(() => null);
+        if (!target) return {};
+        try {
+            await folder.write(folderPrefix + entry.name, entry.content);
+            lastFolderError = null;
+        } catch (e) {
+            lastFolderError = e?.message || String(e); // fica para a tela de backup mostrar, mesmo quando foi o backup automatico
+            return {error: lastFolderError};
+        }
+        await pruneFolder().catch(() => {}); // limpar e so conforto: falhar aqui nao e erro do backup
+        return {saved: target.name};
+    }
+
+    /** Mesmas regras de quantas copias ficam (automaticas separadas das manuais), so nos arquivos que o app criou. */
+    async function pruneFolder() {
+        const mine = (await folder.list()).filter(ownFile).sort().reverse();
+        const auto = mine.filter(n => n.endsWith('-auto.json'));
+        const manual = mine.filter(n => !n.endsWith('-auto.json'));
+        for (const n of [...auto.slice(KEEP_AUTOMATIC), ...manual.slice(KEEP)]) await folder.remove(n);
+    }
+
+    async function handleFolder(method) {
+        if (!folder) throw new HttpError(404, 'Escolher a pasta de backup só existe no aplicativo do celular.');
+        const status = async changed => {
+            const current = await folder.get();
+            return {status: 200, body: {configured: !!current, name: current?.name ?? null, changed, error: lastFolderError}};
+        };
+        if (method === 'GET') return status(false);
+        if (method === 'POST') { // abre o seletor; cancelar nao muda nada
+            const picked = !!await folder.pick();
+            if (picked) lastFolderError = null;
+            return status(picked);
+        }
+        if (method === 'DELETE') {
+            await folder.clear();
+            lastFolderError = null;
+            return {status: 204, body: null};
+        }
+        throw new HttpError(405, 'Método não permitido.');
     }
 
     /** Mantem as copias automaticas (as 7 mais novas) separadas das manuais, para uma nao expulsar a outra. */
@@ -77,6 +132,7 @@ export function createBackupHttp({backup, store, clock = () => new Date()}) {
     /** Devolve {status, body | text} ou null se a rota nao for de backup. */
     async function handle(method, path, body) {
         if (path !== '/backups' && !path.startsWith('/backups/')) return null;
+        if (path === '/backups/folder') return handleFolder(method);
         const parts = path.split('/').filter(Boolean).slice(1).map(decodeURIComponent);
         if (parts.length === 0) {
             if (method === 'GET') return {status: 200, body: await list()};

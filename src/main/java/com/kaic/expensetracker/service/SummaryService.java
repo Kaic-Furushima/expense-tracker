@@ -64,7 +64,9 @@ public class SummaryService {
                 .toList();
         BigDecimal income = amount(scoped, true, true);
         BigDecimal spent = amount(scoped, false, true);
-        BigDecimal balance = income.subtract(spent);
+        // "correção de saldo": aparece à parte (não é receita nem despesa) mas entra no saldo do mês
+        BigDecimal adjustment = adjustments(scoped);
+        BigDecimal balance = income.subtract(spent).add(adjustment);
 
         // What is still to come in the month: pending transactions and pending recurring occurrences.
         BigDecimal pendingIncome = amount(scoped, true, false);
@@ -95,7 +97,7 @@ public class SummaryService {
         MonthSpend monthSpend = spendOf(month, spend);
 
         Map<Long, Tally> byCategory = new LinkedHashMap<>();
-        scoped.stream().filter(b -> !b.income() && b.paid())
+        scoped.stream().filter(b -> !b.income() && b.paid() && !b.adjustment())
                 .forEach(b -> byCategory.merge(b.categoryId(), new Tally(b.amount(), b.count()), Tally::plus));
         book.categoryIds().stream()
                 .filter(id -> book.effective(id, month).isPresent() && byId.containsKey(id))
@@ -128,7 +130,7 @@ public class SummaryService {
 
         return new MonthSummary(month.toString(), income, spent, balance, previousSpent,
                 pendingIncome, pendingExpense, projected,
-                totalBudget, totalBase, totalCarry, monthSpend.total(), rollover, categories, trend);
+                totalBudget, totalBase, totalCarry, monthSpend.total(), rollover, categories, trend, adjustment);
     }
 
     private CategoryTotal toCategoryTotal(Long categoryId, Tally tally, Map<Long, Category> byId,
@@ -202,7 +204,7 @@ public class SummaryService {
         Map<YearMonth, Map<Long, BigDecimal>> own = new HashMap<>();
         Map<YearMonth, BigDecimal> totalByMonth = new HashMap<>();
         for (ExpenseService.Bucket b : totals) {
-            if (b.income() || !b.paid()) {
+            if (b.income() || !b.paid() || b.adjustment()) {
                 continue;
             }
             totalByMonth.merge(b.month(), b.amount(), BigDecimal::add);
@@ -215,6 +217,14 @@ public class SummaryService {
         return result;
     }
 
+    /** Net of the paid balance corrections (positive raised the balance, negative lowered it). */
+    private static BigDecimal adjustments(List<ExpenseService.Bucket> rows) {
+        return rows.stream()
+                .filter(b -> b.adjustment() && b.paid())
+                .map(b -> b.income() ? b.amount() : b.amount().negate())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
     private static boolean inAccount(ExpenseService.Bucket bucket, Long accountId) {
         return accountId == null || accountId.equals(bucket.accountId());
     }
@@ -222,7 +232,7 @@ public class SummaryService {
     /** Sum of the rows of one kind (income or expense) and one status (paid or pending). */
     private static BigDecimal amount(List<ExpenseService.Bucket> rows, boolean income, boolean paid) {
         return rows.stream()
-                .filter(b -> b.income() == income && b.paid() == paid)
+                .filter(b -> !b.adjustment() && b.income() == income && b.paid() == paid)
                 .map(ExpenseService.Bucket::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
@@ -259,6 +269,6 @@ public class SummaryService {
                                BigDecimal previousExpense, BigDecimal pendingIncome, BigDecimal pendingExpense,
                                BigDecimal projectedBalance, BigDecimal totalBudget, BigDecimal totalBudgetBase,
                                BigDecimal totalCarry, BigDecimal totalSpent, boolean budgetRollover,
-                               List<CategoryTotal> categories, List<MonthTotal> trend) {
+                               List<CategoryTotal> categories, List<MonthTotal> trend, BigDecimal adjustment) {
     }
 }

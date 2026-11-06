@@ -52,7 +52,12 @@ public class WishService {
 
     /** What is needed to turn a wish into a purchase. */
     public record Purchase(BigDecimal price, LocalDate date, Long accountId, Long paymentMethodId, Long categoryId,
-                           boolean usePot) {
+                           boolean usePot, int installments) {
+
+        /** A vista (uma parcela só). */
+        public Purchase(BigDecimal price, LocalDate date, Long accountId, Long paymentMethodId, Long categoryId, boolean usePot) {
+            this(price, date, accountId, paymentMethodId, categoryId, usePot, 1);
+        }
     }
 
     public List<WishItem> findAll() {
@@ -130,7 +135,10 @@ public class WishService {
         expense.setAccount(accountService.getOrThrow(purchase.accountId()));
         expense.setPaymentMethod(purchase.paymentMethodId() == null ? null : paymentMethodService.getOrThrow(purchase.paymentMethodId()));
         expense.setCategory(purchase.categoryId() == null ? null : categoryService.getOrThrow(purchase.categoryId()));
-        Expense saved = expenseService.save(expense);
+        // Parcelado: o preço é o total; a primeira parcela fica paga e as outras "a pagar" (no cartão, todas já contam)
+        Expense saved = purchase.installments() > 1
+                ? expenseService.saveInstallments(expense, purchase.installments()).get(0)
+                : expenseService.save(expense);
 
         if (purchase.usePot() && item.getPot() != null) {
             potService.recordPurchase(item.getPot(), price, date, "Compra: " + item.getName(), item.getId());

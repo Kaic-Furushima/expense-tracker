@@ -18,13 +18,15 @@ export class Pots {
     response(p) {
         return {
             id: p.id, name: p.name, color: p.color, icon: p.icon, goal: fromCents(p.goal_cents), mode: p.mode,
-            monthlyAmount: fromCents(p.monthly_cents), startMonth: p.start_month, active: !!p.active, balance: fromCents(p.balance_cents)
+            monthlyAmount: fromCents(p.monthly_cents), startMonth: p.start_month, active: !!p.active, balance: fromCents(p.balance_cents),
+            accountId: p.account_id ?? null, accountName: p.account_name ?? null
         };
     }
 
     select(where = '', params = []) {
-        return this.db.all(`select p.*, coalesce((select sum(e.amount_cents) from pot_entries e where e.pot_id = p.id), 0) balance_cents
-                            from pots p ${where}`, params);
+        return this.db.all(`select p.*, coalesce((select sum(e.amount_cents) from pot_entries e where e.pot_id = p.id), 0) balance_cents,
+                                   a.name account_name
+                            from pots p left join accounts a on a.id = p.account_id ${where}`, params);
     }
 
     row(id) {
@@ -46,9 +48,9 @@ export class Pots {
     create(body) {
         return this.db.tx(() => {
             const f = this.validate(body, null);
-            const {lastId} = this.db.run(`insert into pots (uuid, name, color, icon, goal_cents, mode, monthly_cents, start_month, active, updated_at)
-                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [this.db.newId(), f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.start, f.active, this.db.now()]);
+            const {lastId} = this.db.run(`insert into pots (uuid, name, color, icon, goal_cents, mode, monthly_cents, start_month, active, account_id, updated_at)
+                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [this.db.newId(), f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.start, f.active, f.accountId, this.db.now()]);
             this.sync();
             return this.response(this.row(lastId));
         });
@@ -59,8 +61,8 @@ export class Pots {
         return this.db.tx(() => {
             const current = this.row(id);
             const f = this.validate(body, current);
-            this.db.run('update pots set name = ?, color = ?, icon = ?, goal_cents = ?, mode = ?, monthly_cents = ?, active = ?, updated_at = ? where id = ?',
-                [f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.active, this.db.now(), id]);
+            this.db.run('update pots set name = ?, color = ?, icon = ?, goal_cents = ?, mode = ?, monthly_cents = ?, active = ?, account_id = ?, updated_at = ? where id = ?',
+                [f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.active, f.accountId, this.db.now(), id]);
             this.sync();
             return this.response(this.row(id));
         });
@@ -170,8 +172,10 @@ export class Pots {
         if (mode === 'FIXED' && !(monthly > 0)) throw badRequest('Informe o valor do aporte mensal.');
         if (goal != null && !(goal > 0)) throw badRequest('A meta deve ser maior que zero.');
         if (body.startMonth && !isYearMonth(body.startMonth)) throw badRequest(`Mês inválido: ${body.startMonth} (use aaaa-mm).`);
+        const accountId = body.accountId ?? null;
+        if (accountId != null && !this.db.get('select 1 from accounts where id = ?', [accountId])) throw badRequest(`Conta não encontrada: ${accountId}`);
         return {
-            name,
+            name, accountId,
             color: body.color && HEX_COLOR.test(body.color) ? body.color : '#81C784',
             icon: body.icon && String(body.icon).trim() ? String(body.icon).trim() : null,
             goalCents: goal == null ? null : toCents(goal),

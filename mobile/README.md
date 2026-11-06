@@ -60,6 +60,12 @@ Os testes comparam o comportamento com as regras do back-end Java.
 - **Mais → Backup e restauração → Fazer backup agora** guarda uma cópia dentro do app (arquivo `.json` com tudo). Ao restaurar,
   o app guarda antes uma cópia do que existia. Com "Backup automático todo dia" ligado em Configurações, ele guarda uma por dia
   (as 7 mais recentes). **Salvar uma cópia…** abre o menu Compartilhar do Android (Drive, WhatsApp, e-mail, "Salvar em arquivos").
+- **Pasta dos backups (alterável):** em **Backup e restauração → Pasta dos backups → Escolher pasta…** você escolhe qualquer pasta
+  do celular (seletor do Android). Daí em diante, todo backup, manual ou automático, também é gravado lá, fora do app, e
+  sobrevive a desinstalar o app. Mantém as mesmas 30 manuais / 7 automáticas e só apaga arquivos `backup-….json` do próprio app.
+  "Trocar pasta…" muda o destino e "Parar de usar" volta ao padrão (os arquivos já gravados ficam). Se a pasta falhar (apagada,
+  permissão perdida), o backup interno continua valendo e a tela mostra o erro. Perfis que não são o principal gravam com o
+  prefixo `<id-do-perfil>_`. Plugin nativo: `android/.../BackupFolderPlugin.java`.
 - **Trazer os dados do PC:** no programa do computador, Mais → Backup e restauração → abra um backup → "Salvar uma cópia no
   computador…" (arquivo `.sql`). Envie o arquivo ao celular e, no app, use **Restaurar de um arquivo…**. O app reconhece sozinho
   o backup do computador (script do H2) e converte tudo: lançamentos, contas, categorias, orçamentos, tags, anexos e configurações.
@@ -109,7 +115,7 @@ O servidor padrão (opcional) vem de `sync-hub.json` (`url` e `anonKey`), copiad
 ## Cuidados
 
 - Os dados ficam no armazenamento do app (IndexedDB do WebView). **Desinstalar o app ou limpar os dados apaga tudo**: faça um
-  backup e guarde o arquivo fora do celular (Compartilhar → Drive, por exemplo). As cópias guardadas *dentro* do app somem junto.
+  backup e guarde o arquivo fora do celular (Compartilhar → Drive, por exemplo). As cópias guardadas *dentro* do app somem junto (escolha uma "Pasta dos backups" para evitar isso).
 - Dinheiro é guardado em centavos inteiros (`*_cents`).
 - Para mudar o esquema, acrescente uma entrada em `MIGRATIONS` (`schema.js`); nunca edite as antigas.
 

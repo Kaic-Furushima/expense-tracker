@@ -31,13 +31,13 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long>, JpaSpec
 
     /**
      * Totals of the transactions between two dates, grouped by month, kind, status, category and account. Each row is
-     * {year, month, type, status, category id, account id, sum, count}; the summary is built from these few rows
+     * {year, month, type, status, category id, account id, sum, count, adjustment}; the summary is built from these few rows
      * instead of loading every transaction of the period.
      */
-    @Query("select year(e.date), month(e.date), e.type, e.status, c.id, a.id, sum(e.amount), count(e) "
+    @Query("select year(e.date), month(e.date), e.type, e.status, c.id, a.id, sum(e.amount), count(e), e.adjustment "
             + "from Expense e left join e.category c left join e.account a "
             + "where e.date between :start and :end "
-            + "group by year(e.date), month(e.date), e.type, e.status, c.id, a.id")
+            + "group by year(e.date), month(e.date), e.type, e.status, c.id, a.id, e.adjustment")
     List<Object[]> totalsBetween(LocalDate start, LocalDate end);
 
     /** Sum of the paid transactions that are not income (every account); null when there are none. */

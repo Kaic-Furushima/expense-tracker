@@ -305,5 +305,13 @@ ${triggersFor('categories').join('\n')}
 pragma foreign_keys = on;
 ${SPLIT_KINDS_SQL}`;
 
-export const MIGRATIONS = [V1, syncSchema(), V3];
+/**
+ * Caixinha atrelada a uma conta (o banco onde o dinheiro esta) e "correcao de saldo". A coluna "adjustment" aceita nulo de
+ * proposito: aparelhos com uma versao antiga do sync mandam lancamentos sem esse campo (nulo vale 0).
+ */
+const V4 = `
+alter table pots add column account_id integer references accounts (id) on delete set null;
+alter table expenses add column adjustment integer default 0;`;
+
+export const MIGRATIONS = [V1, syncSchema(), V3, V4];
 export const SCHEMA_VERSION = MIGRATIONS.length;

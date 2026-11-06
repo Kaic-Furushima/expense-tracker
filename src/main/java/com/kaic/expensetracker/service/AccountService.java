@@ -2,9 +2,12 @@ package com.kaic.expensetracker.service;
 
 import com.kaic.expensetracker.model.Account;
 import com.kaic.expensetracker.model.AccountType;
+import com.kaic.expensetracker.model.Expense;
+import com.kaic.expensetracker.model.ExpenseStatus;
 import com.kaic.expensetracker.model.TransactionType;
 import com.kaic.expensetracker.repository.AccountRepository;
 import com.kaic.expensetracker.repository.ExpenseRepository;
+import com.kaic.expensetracker.repository.PotRepository;
 import com.kaic.expensetracker.repository.RecurringPaymentRepository;
 import com.kaic.expensetracker.repository.TransferRepository;
 import org.springframework.http.HttpStatus;
@@ -13,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,9 +33,14 @@ public class AccountService {
     private final ExpenseRepository expenseRepository;
     private final RecurringPaymentRepository recurringPaymentRepository;
     private final TransferRepository transferRepository;
+    private final PotRepository potRepository;
+    private final Clock clock;
 
     public AccountService(AccountRepository accountRepository, ExpenseRepository expenseRepository,
-                          RecurringPaymentRepository recurringPaymentRepository, TransferRepository transferRepository) {
+                          RecurringPaymentRepository recurringPaymentRepository, TransferRepository transferRepository,
+                          PotRepository potRepository, Clock clock) {
+        this.clock = clock;
+        this.potRepository = potRepository;
         this.accountRepository = accountRepository;
         this.expenseRepository = expenseRepository;
         this.recurringPaymentRepository = recurringPaymentRepository;
@@ -129,7 +140,48 @@ public class AccountService {
         if (!account.isArchived() && account.getParent() == null && activeTopLevelCount() <= 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Mantenha pelo menos uma conta ativa.");
         }
+        // as caixinhas atreladas a esta conta só perdem o vínculo
+        potRepository.findByAccount(account).forEach(p -> {
+            p.setAccount(null);
+            potRepository.save(p);
+        });
         accountRepository.delete(account);
+    }
+
+    public static final String ADJUSTMENT_NAME = "Correção de saldo";
+
+    /**
+     * "Correção de saldo": the person types the balance the account really has and the app records the difference as a
+     * paid entry flagged as an adjustment (income when the balance goes up, expense when it goes down). It is shown on
+     * its own in the month summary and is not counted as income or expense. Returns null when nothing had to change.
+     */
+    @Transactional
+    public Expense adjustBalance(Long id, BigDecimal target) {
+        Account account = getOrThrow(id);
+        if (target == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o saldo atual.");
+        }
+        if (account.getType() == AccountType.CREDIT_CARD) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cartão de crédito não tem correção de saldo.");
+        }
+        BigDecimal wanted = target.setScale(2, RoundingMode.HALF_UP);
+        if (wanted.abs().compareTo(new BigDecimal("999999999.99")) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O saldo é alto demais.");
+        }
+        BigDecimal current = balances().getOrDefault(id, account.getInitialBalance());
+        BigDecimal diff = wanted.subtract(current);
+        if (diff.signum() == 0) {
+            return null;
+        }
+        Expense entry = new Expense();
+        entry.setName(ADJUSTMENT_NAME);
+        entry.setAmount(diff.abs());
+        entry.setDate(LocalDate.now(clock));
+        entry.setType(diff.signum() > 0 ? TransactionType.INCOME : TransactionType.EXPENSE);
+        entry.setStatus(ExpenseStatus.PAID);
+        entry.setAccount(account);
+        entry.setAdjustment(true);
+        return expenseRepository.save(entry);
     }
 
     @Transactional

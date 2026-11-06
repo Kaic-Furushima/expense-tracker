@@ -48,7 +48,7 @@ export class Expenses {
             paymentMethodId: row.payment_method_id, paymentMethodName: row.pm_name ?? null,
             tags: tags.get(row.id) ?? [],
             installmentNumber: row.installment_number, installmentTotal: row.installment_total,
-            createdAt: row.created_at, updatedAt: row.updated_at
+            createdAt: row.created_at, updatedAt: row.updated_at, adjustment: !!row.adjustment
         };
     }
 

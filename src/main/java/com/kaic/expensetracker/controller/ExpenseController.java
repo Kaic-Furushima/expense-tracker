@@ -318,7 +318,8 @@ public class ExpenseController {
             Integer installmentNumber,
             Integer installmentTotal,
             LocalDateTime createdAt,
-            LocalDateTime updatedAt
+            LocalDateTime updatedAt,
+            boolean adjustment
     ) {
         public static ExpenseResponse fromEntity(Expense e) {
             Category c = e.getCategory();
@@ -339,7 +340,7 @@ public class ExpenseController {
                     m == null ? null : m.getName(),
                     e.getTags().stream().map(Tag::getName).sorted().toList(),
                     e.getInstallmentNumber(), e.getInstallmentTotal(),
-                    e.getCreatedAt(), e.getUpdatedAt());
+                    e.getCreatedAt(), e.getUpdatedAt(), e.isAdjustment());
         }
     }
 }

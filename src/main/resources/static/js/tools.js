@@ -148,9 +148,22 @@ async function renderBackupPage() {
     bindBack();
     let backups;
     try { backups = await api('/backups'); } catch (e) { toast(e.message); return; }
+    // celular: pasta de backups escolhida pela pessoa (fora do app); no computador/navegador essa rota nao existe
+    let folder = null;
+    if (window.localApp) { try { folder = await api('/backups/folder'); } catch (e) { folder = null; } }
+    const folderBox = !folder ? '' : `<div class="card stack-tight">
+            <strong>Pasta dos backups</strong>
+            <span class="small muted">${folder.configured
+                ? `Cada backup (inclusive o automático) também é gravado em <strong>${esc(folder.name)}</strong>, fora do aplicativo.`
+                : 'Hoje os backups ficam só dentro do aplicativo e somem se ele for desinstalado. Escolha uma pasta do celular para guardar uma cópia lá também.'}</span>
+            ${folder.error ? `<span class="small" style="color:var(--warn)">Não foi possível gravar na pasta: ${esc(folder.error)}</span>` : ''}
+            <div class="form-actions"><button type="button" class="btn" id="folder-pick">${folder.configured ? 'Trocar pasta…' : 'Escolher pasta…'}</button>
+                ${folder.configured ? '<button type="button" class="btn" id="folder-clear">Parar de usar</button>' : ''}</div>
+        </div>`;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Backup e restauração')}
         ${tip('backup', `Um backup é uma cópia de <strong>tudo</strong>: lançamentos, contas, categorias, orçamentos, metas e configurações. Fica guardado ${window.localApp ? 'dentro do aplicativo' : 'na pasta de dados do aplicativo'}; guarde também uma cópia ${window.localApp ? 'fora do celular' : 'fora do computador'} (nuvem ou pen drive).`)}
         <button class="btn primary block" id="make-backup">${ico('shield')} Fazer backup agora</button>
+        ${folderBox}
         <h2 class="section-title">Backups guardados</h2>
         ${backups.length ? `<div class="list">${backups.map((b, i) => {
             const l = backupLabel(b);
@@ -163,8 +176,29 @@ async function renderBackupPage() {
     </div>`;
     bindBack();
     $('#make-backup').onclick = async () => {
-        try { await api('/backups', {method: 'POST'}); toast('Backup criado'); renderBackupPage(); } catch (e) { toast(e.message); }
+        try {
+            const made = await api('/backups', {method: 'POST'});
+            toast(made.folderError ? `Backup criado, mas não foi possível gravar na pasta: ${made.folderError}` : made.folder ? `Backup criado e gravado em ${made.folder}` : 'Backup criado');
+            renderBackupPage();
+        } catch (e) { toast(e.message); }
     };
+    if (folder) {
+        $('#folder-pick').onclick = async () => {
+            try {
+                const res = await api('/backups/folder', {method: 'POST'});
+                if (!res.changed) return;
+                // faz um backup já, para a pessoa ver o arquivo aparecer na pasta e saber que funcionou
+                const made = await api('/backups', {method: 'POST'});
+                toast(made.folderError ? `Pasta escolhida, mas não foi possível gravar: ${made.folderError}` : `Pasta escolhida: ${res.name}. Um backup já foi gravado lá.`);
+                renderBackupPage();
+            } catch (e) { toast(e.message); }
+        };
+        const clear = $('#folder-clear');
+        if (clear) clear.onclick = async () => {
+            if (!await confirmDialog('Parar de gravar os backups na pasta? Os arquivos que já estão lá continuam lá.', {okLabel: 'Parar'})) return;
+            try { await api('/backups/folder', {method: 'DELETE'}); renderBackupPage(); } catch (e) { toast(e.message); }
+        };
+    }
     $$('[data-backup]').forEach(b => b.onclick = () => openBackupSheet(backups[Number(b.dataset.backup)]));
     $('#restore-file').onclick = async () => {
         const content = await pickTextFile('.sql,.json,.txt');

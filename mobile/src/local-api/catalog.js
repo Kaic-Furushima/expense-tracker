@@ -1,5 +1,7 @@
 import {badRequest, conflict, invalid, notFound} from './http.js';
-import {fromCents, toCents} from './util.js';
+import {fromCents, isoDate, toCents} from './util.js';
+
+const ADJUSTMENT_NAME = 'Correção de saldo';
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -261,7 +263,28 @@ export class Catalog {
             throw conflict('Esta conta tem lançamentos, transferências ou pagamentos recorrentes (a lixeira conta). Arquive-a em vez de excluir.');
         }
         if (!account.archived && account.parent_id == null && this.activeTopLevelCount() <= 1) throw conflict('Mantenha pelo menos uma conta ativa.');
-        this.db.run('delete from accounts where id = ?', [id]);
+        this.db.run('delete from accounts where id = ?', [id]); // as caixinhas atreladas so perdem o vinculo (on delete set null)
+    }
+
+    /**
+     * "Correcao de saldo": a pessoa informa o saldo que a conta realmente tem e o app anota a diferenca como um lancamento
+     * pago marcado como correcao (receita se o saldo sobe, despesa se desce). Nao conta como receita nem despesa no resumo
+     * do mes. Nao muda nada se o saldo ja for esse.
+     */
+    adjustBalance(id, body) {
+        const account = this.account(id);
+        if (account.type === 'CREDIT_CARD') throw badRequest('Cartão de crédito não tem correção de saldo.');
+        const target = body.balance == null || body.balance === '' ? null : Number(body.balance);
+        if (target == null || Number.isNaN(target)) throw invalid({balance: 'Informe o saldo atual.'});
+        if (Math.abs(target) > 999999999.99) throw invalid({balance: 'O saldo é alto demais.'});
+        const diff = toCents(target) - (this.balances().get(id) ?? account.initial_cents);
+        if (diff !== 0) {
+            const now = this.db.now();
+            this.db.tx(() => this.db.run(`insert into expenses (uuid, name, amount_cents, date, type, status, account_id, adjustment, created_at, updated_at)
+                values (?, ?, ?, ?, ?, 'PAID', ?, 1, ?, ?)`,
+                [this.db.newId(), ADJUSTMENT_NAME, Math.abs(diff), isoDate(this.db.clock()), diff > 0 ? 'INCOME' : 'EXPENSE', id, now, now]));
+        }
+        return this.accountWithBalance(id);
     }
 
     activeTopLevelCount() {

@@ -92,10 +92,11 @@ public class PotController {
             PotMode mode,
             @DecimalMax(value = "999999999.99", message = "O aporte é alto demais.") BigDecimal monthlyAmount,
             String startMonth,
-            Boolean active) {
+            Boolean active,
+            Long accountId) {
 
         PotService.Draft toDraft() {
-            return new PotService.Draft(name, color, icon, goal, mode, monthlyAmount, startMonth, active == null || active);
+            return new PotService.Draft(name, color, icon, goal, mode, monthlyAmount, startMonth, active == null || active, accountId);
         }
     }
 
@@ -108,10 +109,13 @@ public class PotController {
     }
 
     public record PotResponse(Long id, String name, String color, String icon, BigDecimal goal, PotMode mode,
-                              BigDecimal monthlyAmount, String startMonth, boolean active, BigDecimal balance) {
+                              BigDecimal monthlyAmount, String startMonth, boolean active, BigDecimal balance,
+                              Long accountId, String accountName) {
         static PotResponse fromEntity(Pot p, BigDecimal balance) {
             return new PotResponse(p.getId(), p.getName(), p.getColor(), p.getIcon(), p.getGoal(), p.getMode(),
-                    p.getMonthlyAmount(), p.getStartMonth(), p.isActive(), balance);
+                    p.getMonthlyAmount(), p.getStartMonth(), p.isActive(), balance,
+                    p.getAccount() == null ? null : p.getAccount().getId(),
+                    p.getAccount() == null ? null : p.getAccount().getName());
         }
     }
 

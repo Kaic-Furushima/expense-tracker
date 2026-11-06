@@ -2,6 +2,7 @@ import {conflict, invalid, notFound} from './http.js';
 import {fromCents, isIsoDate, isoDate, toCents} from './util.js';
 
 const MAX_AMOUNT = 999999999.99;
+const MAX_INSTALLMENTS = 60;
 
 /**
  * Lista de desejos: produtos com preco estimado que nao pertencem a nenhuma conta ate serem comprados. Comprar registra
@@ -90,6 +91,9 @@ export class Wishes {
         else if (price > MAX_AMOUNT) errors.price = 'O preço é alto demais.';
         if (body.accountId == null) errors.accountId = 'Informe em qual conta foi a compra.';
         if (body.date != null && !isIsoDate(body.date)) errors.date = 'Data inválida.';
+        const installments = body.installments == null ? 1 : body.installments;
+        if (!Number.isInteger(installments) || installments < 1) errors.installments = 'O número de parcelas deve ser de pelo menos 1.';
+        else if (installments > MAX_INSTALLMENTS) errors.installments = 'O número de parcelas pode ser de até 60.';
         if (Object.keys(errors).length) throw invalid(errors);
 
         return this.db.tx(() => {
@@ -100,10 +104,13 @@ export class Wishes {
             const account = this.catalog.account(body.accountId);
             if (body.paymentMethodId != null) this.catalog.method(body.paymentMethodId);
             if (body.categoryId != null) this.catalog.category(body.categoryId);
-            const expenseId = this.expenses.insert({
+            const fields = {
                 name: item.name, description: item.notes, amountCents: cents, date, type: 'EXPENSE', status: 'PAID',
-                categoryId: body.categoryId ?? null, accountId: account.id, paymentMethodId: body.paymentMethodId ?? null, tagIds: []
-            });
+                categoryId: body.categoryId ?? null, accountId: account.id, accountType: account.type,
+                paymentMethodId: body.paymentMethodId ?? null, tagIds: [], installments
+            };
+            // parcelado: o preco e o total; a primeira parcela fica paga e as outras "a pagar" (no cartao, todas ja contam)
+            const expenseId = installments > 1 ? this.expenses.insertInstallments(fields)[0] : this.expenses.insert(fields);
             if (body.usePot === true && item.pot_id != null) this.pots.recordPurchase(item.pot_id, cents, date, `Compra: ${item.name}`, item.id);
             this.db.run("update wish_items set status = 'BOUGHT', real_cents = ?, purchase_date = ?, expense_id = ?, updated_at = ? where id = ?",
                 [cents, date, expenseId, this.db.now(), id]);

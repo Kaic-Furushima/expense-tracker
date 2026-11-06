@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
@@ -51,11 +53,13 @@ public class BackupService {
     private final JdbcTemplate jdbc;
     private final ProfileService profiles;
     private final SettingsService settings;
+    private final TransactionTemplate transaction;
 
-    public BackupService(JdbcTemplate jdbc, ProfileService profiles, SettingsService settings) {
+    public BackupService(JdbcTemplate jdbc, ProfileService profiles, SettingsService settings, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.profiles = profiles;
         this.settings = settings;
+        this.transaction = new TransactionTemplate(transactions);
     }
 
     /** Each profile keeps its backups next to its own database. */
@@ -124,6 +128,10 @@ public class BackupService {
     }
 
     private void restoreScript(String script) {
+        if (MobileBackupImporter.looksLikeJson(script)) {
+            restoreMobileJson(script);
+            return;
+        }
         String clean = sanitize(script);
         BackupInfo safety = write("backup-" + LocalDateTime.now().format(STAMP) + "-antes-de-restaurar.sql");
         Path temp = folder().resolve("restore.tmp");
@@ -147,6 +155,20 @@ public class BackupService {
             }
         }
         profiles.migrateCurrent(); // a backup from an older version is brought up to date
+    }
+
+    /** The phone's backup (JSON): written in one transaction, so a bad file leaves the data untouched. */
+    private void restoreMobileJson(String content) {
+        write("backup-" + LocalDateTime.now().format(STAMP) + "-antes-de-restaurar.sql");
+        try {
+            transaction.executeWithoutResult(status -> new MobileBackupImporter(jdbc).restore(content));
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.error("Restauracao do backup do celular falhou; nada foi alterado", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Não foi possível restaurar: o arquivo não parece um backup válido deste aplicativo. Seus dados foram mantidos.");
+        }
     }
 
     private void runScript(Path file) {

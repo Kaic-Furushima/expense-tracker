@@ -25,7 +25,7 @@ const FROM_H2 = {
         id: 'id', uuid: 'uuid', name: 'name', description: 'description', amount_cents: ['amount', 'cents'], date: 'date', type: 'type',
         status: 'status', category_id: 'category_id', account_id: 'account_id', payment_method_id: 'payment_method_id',
         installment_group: 'installment_group', installment_number: 'installment_number', installment_total: 'installment_total',
-        created_at: ['created_at', 'ts'], updated_at: ['updated_at', 'ts'], deleted_at: ['deleted_at', 'ts']
+        created_at: ['created_at', 'ts'], updated_at: ['updated_at', 'ts'], deleted_at: ['deleted_at', 'ts'], adjustment: ['adjustment', 'bool']
     },
     tags: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     expense_tags: {expense_id: 'expense_id', tag_id: 'tag_id'},
@@ -46,7 +46,7 @@ const FROM_H2 = {
     },
     pots: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', color: 'color', icon: 'icon', goal_cents: ['goal', 'cents'], mode: 'mode',
-        monthly_cents: ['monthly_amount', 'cents'], start_month: 'start_month', active: ['active', 'bool']
+        monthly_cents: ['monthly_amount', 'cents'], start_month: 'start_month', active: ['active', 'bool'], account_id: 'account_id'
     },
     wish_items: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', estimated_cents: ['estimated_price', 'cents'], notes: 'notes', url: 'url', status: 'status',

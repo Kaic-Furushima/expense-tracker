@@ -4,6 +4,7 @@ import com.kaic.expensetracker.model.Pot;
 import com.kaic.expensetracker.model.PotEntry;
 import com.kaic.expensetracker.model.PotEntryKind;
 import com.kaic.expensetracker.model.PotMode;
+import com.kaic.expensetracker.repository.AccountRepository;
 import com.kaic.expensetracker.repository.PotEntryRepository;
 import com.kaic.expensetracker.repository.PotRepository;
 import com.kaic.expensetracker.repository.WishItemRepository;
@@ -32,9 +33,12 @@ public class PotService {
     private final PotEntryRepository entries;
     private final WishItemRepository wishItems;
     private final Clock clock;
+    private final AccountRepository accounts;
 
-    public PotService(PotRepository pots, PotEntryRepository entries, WishItemRepository wishItems, Clock clock) {
+    public PotService(PotRepository pots, PotEntryRepository entries, WishItemRepository wishItems, Clock clock,
+                      AccountRepository accounts) {
         this.clock = clock;
+        this.accounts = accounts;
         this.pots = pots;
         this.entries = entries;
         this.wishItems = wishItems;
@@ -42,7 +46,12 @@ public class PotService {
 
     /** Fields of a pot, as typed by the user. */
     public record Draft(String name, String color, String icon, BigDecimal goal, PotMode mode,
-                        BigDecimal monthlyAmount, String startMonth, boolean active) {
+                        BigDecimal monthlyAmount, String startMonth, boolean active, Long accountId) {
+
+        public Draft(String name, String color, String icon, BigDecimal goal, PotMode mode,
+                     BigDecimal monthlyAmount, String startMonth, boolean active) {
+            this(name, color, icon, goal, mode, monthlyAmount, startMonth, active, null);
+        }
     }
 
     /** Lists the pots after adding any automatic contribution that is due. */
@@ -186,6 +195,8 @@ public class PotService {
             pot.setStartMonth(start.toString());
         }
         pot.setActive(d.active());
+        pot.setAccount(d.accountId() == null ? null : accounts.findById(d.accountId()).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada: " + d.accountId())));
     }
 
     private static void requirePositive(BigDecimal amount) {

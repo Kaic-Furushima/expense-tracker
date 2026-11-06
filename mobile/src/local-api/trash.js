@@ -15,11 +15,11 @@ export class Trash {
         const items = [
             ...this.db.all(`select e.*, a.name acc_name, c.name cat_name from expenses e join accounts a on a.id = e.account_id
                             left join categories c on c.id = e.category_id where e.deleted_at is not null`)
-                .map(e => ({kind: 'EXPENSE', id: e.id, name: e.name, amount: e.amount_cents / 100, date: e.date,
+                .map(e => ({kind: 'EXPENSE', id: e.id, title: e.name, amount: e.amount_cents / 100, date: e.date,
                     detail: e.acc_name + (e.cat_name ? ` · ${e.cat_name}` : ''), deletedAt: e.deleted_at})),
             ...this.db.all(`select t.*, f.name from_name, d.name to_name from transfers t join accounts f on f.id = t.from_account_id
                             join accounts d on d.id = t.to_account_id where t.deleted_at is not null`)
-                .map(t => ({kind: 'TRANSFER', id: t.id, name: t.description ?? 'Transferência', amount: t.amount_cents / 100, date: t.date,
+                .map(t => ({kind: 'TRANSFER', id: t.id, title: t.description ?? 'Transferência', amount: t.amount_cents / 100, date: t.date,
                     detail: `${t.from_name} → ${t.to_name}`, deletedAt: t.deleted_at}))
         ];
         return items.sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : a.deletedAt > b.deletedAt ? -1 : 0));

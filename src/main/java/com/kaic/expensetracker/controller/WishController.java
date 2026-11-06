@@ -6,6 +6,8 @@ import com.kaic.expensetracker.service.WishService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -61,7 +63,8 @@ public class WishController {
     @PostMapping("/{id}/buy")
     public WishResponse buy(@PathVariable Long id, @Valid @RequestBody BuyRequest request) {
         return WishResponse.fromEntity(service.buy(id, new WishService.Purchase(request.price(), request.date(),
-                request.accountId(), request.paymentMethodId(), request.categoryId(), Boolean.TRUE.equals(request.usePot()))));
+                request.accountId(), request.paymentMethodId(), request.categoryId(), Boolean.TRUE.equals(request.usePot()),
+                request.installments() == null ? 1 : request.installments())));
     }
 
     @PostMapping("/{id}/discard")
@@ -95,7 +98,9 @@ public class WishController {
             @NotNull(message = "Informe em qual conta foi a compra.") Long accountId,
             Long paymentMethodId,
             Long categoryId,
-            Boolean usePot) {
+            Boolean usePot,
+            @Min(value = 1, message = "O número de parcelas deve ser de pelo menos 1.")
+            @Max(value = 60, message = "O número de parcelas pode ser de até 60.") Integer installments) {
     }
 
     public record WishResponse(Long id, String name, BigDecimal estimatedPrice, String notes, String url,

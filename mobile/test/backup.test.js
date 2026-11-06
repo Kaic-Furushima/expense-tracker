@@ -258,3 +258,76 @@ describe('exportar CSV', () => {
         assert.equal(lines[2], `2026-05-02;EXPENSE;"'=SOMA(A1)";"Mercado";12.50;"Conta principal";;;PAGO;"a b";"linha 1 linha 2"`);
     });
 });
+
+describe('pasta de backups escolhida pela pessoa', () => {
+    const fakeFolder = () => {
+        const files = new Map();
+        let current = null;
+        let failing = false;
+        return {
+            files, setFailing: v => { failing = v; },
+            get: async () => current,
+            pick: async () => { current = {name: 'Documentos/Backups'}; return current; },
+            clear: async () => { current = null; },
+            write: async (name, text) => { if (failing) throw new Error('Sem permissão para esta pasta.'); files.set(name, text); },
+            list: async () => [...files.keys(), 'foto.jpg'],
+            remove: async name => { files.delete(name); }
+        };
+    };
+
+    it('sem pasta escolhida nada e gravado fora do app', async () => {
+        const folder = fakeFolder();
+        const http = createBackupHttp({backup: api.services.backup, store: new MemoryBackupStore(), clock: () => now, folder});
+        const made = (await http.handle('POST', '/backups')).body;
+        assert.equal(made.folder, undefined);
+        assert.equal(folder.files.size, 0);
+        assert.deepEqual((await http.handle('GET', '/backups/folder')).body, {configured: false, name: null, changed: false, error: null});
+    });
+
+    it('com pasta, cada backup (manual e automatico) tambem vai para la, com o mesmo conteudo', async () => {
+        const folder = fakeFolder();
+        const http = createBackupHttp({backup: api.services.backup, store: new MemoryBackupStore(), clock: () => now, folder});
+        assert.equal((await http.handle('POST', '/backups/folder')).body.changed, true);
+        const made = (await http.handle('POST', '/backups')).body;
+        assert.equal(made.folder, 'Documentos/Backups');
+        assert.equal(folder.files.get(made.name), await http.read(made.name));
+        await http.automaticIfDue(true);
+        assert.equal(folder.files.size, 2);
+        assert.equal((await http.handle('DELETE', '/backups/folder')).status, 204);
+        assert.equal((await http.handle('GET', '/backups/folder')).body.configured, false);
+    });
+
+    it('se a pasta falhar o backup continua valendo e o erro aparece', async () => {
+        const folder = fakeFolder();
+        const http = createBackupHttp({backup: api.services.backup, store: new MemoryBackupStore(), clock: () => now, folder});
+        await http.handle('POST', '/backups/folder');
+        folder.setFailing(true);
+        const made = (await http.handle('POST', '/backups')).body;
+        assert.match(made.folderError, /permissão/);
+        assert.equal((await http.handle('GET', '/backups')).body.length, 1);
+        assert.match((await http.handle('GET', '/backups/folder')).body.error, /permissão/);
+        folder.setFailing(false);
+        await http.handle('POST', '/backups');
+        assert.equal((await http.handle('GET', '/backups/folder')).body.error, null);
+    });
+
+    it('limpa os antigos da pasta, so os do app e so os do proprio perfil', async () => {
+        const folder = fakeFolder();
+        const http = createBackupHttp({backup: api.services.backup, store: new MemoryBackupStore(), clock: () => now, folder, folderPrefix: 'p1_'});
+        folder.files.set('backup-20200101-000000.json', 'outro perfil');
+        await http.handle('POST', '/backups/folder');
+        for (let i = 0; i < KEEP + 3; i++) {
+            now = new Date(2026, 4, 15, 12, 0, i);
+            await http.handle('POST', '/backups');
+        }
+        const mine = [...folder.files.keys()].filter(k => k.startsWith('p1_'));
+        assert.equal(mine.length, KEEP);
+        assert.ok(folder.files.has('backup-20200101-000000.json'));
+        assert.ok(mine.includes('p1_backup-20260515-120000.json') === false, 'os mais antigos saem primeiro');
+    });
+
+    it('no navegador (sem pasta) a rota responde 404', async () => {
+        const http = createBackupHttp({backup: api.services.backup, store: new MemoryBackupStore(), clock: () => now});
+        await assert.rejects(http.handle('GET', '/backups/folder'), e => e.status === 404);
+    });
+});

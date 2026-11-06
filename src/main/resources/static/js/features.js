@@ -4,10 +4,8 @@
    Loaded after app.js; it reuses its helpers ($, api, openSheet, run, state, ...). */
 
 /* ---------- Shared helpers ---------- */
-const ACCOUNT_TYPES = {
-    CHECKING: 'Conta corrente', SAVINGS: 'Poupança', WALLET: 'Carteira / dinheiro',
-    CREDIT_CARD: 'Cartão de crédito', INVESTMENT: 'Investimentos'
-};
+/* The kind of account (corrente, poupança…) is no longer shown nor asked: the only distinction that matters is the credit card. */
+const accountKind = a => (a.type === 'CREDIT_CARD' ? 'Cartão de crédito' : '');
 const ACCOUNT_ICONS = ['bank', 'wallet', 'cash', 'credit-card', 'trending'];
 const POT_ICONS = ['coins', 'gift', 'home', 'target', 'sparkles', 'leaf', 'book', 'gamepad', 'tv', 'bus'];
 
@@ -184,7 +182,7 @@ function openAccountPicker() {
             <button class="row" data-acc=""><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
                 <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null ? check : ''}</button>
             ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}">${avatar(a.icon || 'bank', a.color)}
-                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${esc(ACCOUNT_TYPES[a.type])} · ${money(a.balance)}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
+                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
             <button class="row" id="acc-new"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button>
         </div>`);
     $('#acc-new', sheet).onclick = () => { closeSheet(); openAccountSheet(null); };
@@ -445,7 +443,9 @@ function renderMoreMenu() {
             <button class="btn block" id="open-data" hidden>${ico('folder')} Abrir pasta de dados</button>
         </div>
         ${window.localApp ? '' : '<p class="small muted" style="text-align:center">No celular, abra este endereço no navegador e use “Adicionar à tela inicial”.</p>'}
+        <div class="list"><button class="row" id="about-project"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Sobre o Projeto</span><span class="muted">${ico('chevron-right')}</span></button></div>
     </div>`;
+    $('#about-project').onclick = openAboutProject;
     $$('[data-sub]').forEach(b => b.onclick = () => { state.sub = b.dataset.sub; render(); window.scrollTo({top: 0}); });
     const saveSetting = async (body, message, input) => {
         try {
@@ -540,7 +540,7 @@ function renderAccountsPage() {
     const saved = active.filter(a => a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
     const cardInfo = a => a.type === 'CREDIT_CARD' ? (a.closingDay && a.dueDay ? ` · fecha dia ${a.closingDay}, vence dia ${a.dueDay} · ver faturas` : ' · defina o fechamento') : '';
     const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}">${avatar(a.icon || 'bank', a.color)}
-        <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${esc(ACCOUNT_TYPES[a.type])}${cardInfo(a)}${a.parentName ? ' · dentro de ' + esc(a.parentName) : ''}${a.archived ? ' · arquivada' : ''}</span></span>
+        <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a) + cardInfo(a), a.parentName ? 'dentro de ' + esc(a.parentName) : '', a.archived ? 'arquivada' : ''].filter(Boolean).join(' · ') || '&nbsp;'}</span></span>
         <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance)}</span></button>`;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Contas')}
         <div class="card">
@@ -566,11 +566,9 @@ function openAccountSheet(account) {
         <h2>${account ? 'Editar conta' : 'Nova conta'}</h2>
         <form id="acc-form" novalidate>
             <div class="field"><label for="a-name">Nome</label><input id="a-name" maxlength="80" placeholder="Ex.: Santander" value="${esc(account?.name)}"></div>
-            <div class="grid2">
-                <div class="field"><label for="a-type">Tipo</label><select id="a-type">${Object.entries(ACCOUNT_TYPES).map(([k, v]) =>
-                    `<option value="${k}" ${(account?.type || 'CHECKING') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-                <div class="field"><label>Cor</label><div class="swatches" id="a-colors"></div></div>
-            </div>
+            <div class="field"><label>Cor</label><div class="swatches" id="a-colors"></div></div>
+            <label class="switch-row"><input type="checkbox" id="a-card-toggle" ${account?.type === 'CREDIT_CARD' ? 'checked' : ''}>
+                <span>É um cartão de crédito${info('Cartão tem fatura (dia de fechamento e de vencimento) e o saldo dele é o que você deve.')}</span></label>
             <div class="grid2" id="a-card" hidden>
                 <div class="field"><label for="a-closing">Dia de fechamento</label><input id="a-closing" inputmode="numeric" maxlength="2" placeholder="Ex.: 10" value="${esc(account?.closingDay ?? '')}"></div>
                 <div class="field"><label for="a-due">Dia de vencimento</label><input id="a-due" inputmode="numeric" maxlength="2" placeholder="Ex.: 20" value="${esc(account?.dueDay ?? '')}"></div>
@@ -582,6 +580,8 @@ function openAccountSheet(account) {
                     : 'Para investimentos que ficam dentro de um banco (ex.: a caixinha do Nubank). O saldo dela fica separado do saldo disponível da conta; para guardar dinheiro, faça uma transferência.'}</span></div>
             <div class="field"><label for="a-balance">Saldo inicial (${esc(currencySymbol())})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
                 <span class="small muted">Quanto havia na conta antes de começar a lançar aqui. Pode ser negativo.</span></div>
+            ${account && account.type !== 'CREDIT_CARD' ? `<button type="button" class="btn block" id="a-adjust">${ico('pencil')} Corrigir saldo…</button>
+                <span class="small muted" style="margin-top:-6px">O saldo atual é ${money(account.balance)}. Se não bate com o do banco, informe o certo e o app anota a diferença.</span>` : ''}
             <div class="field"><label>Ícone</label><div class="icon-picker" id="a-icons"></div></div>
             ${account ? `<label class="switch-row"><input type="checkbox" id="a-archived" ${account.archived ? 'checked' : ''}><span>Arquivada${info(`Mantém o histórico, mas não aparece ao lançar.`)}</span></label>` : ''}
             <div class="form-actions">
@@ -592,13 +592,15 @@ function openAccountSheet(account) {
     const icon = iconPicker(sheet, '#a-icons', ACCOUNT_ICONS, account?.icon || 'bank');
     const colorOf = colorPicker(sheet, '#a-colors', account?.color || '#64B5F6');
     const paintCard = () => {
-        const card = $('#a-type', sheet).value === 'CREDIT_CARD';
+        const card = $('#a-card-toggle', sheet).checked;
         $('#a-card', sheet).hidden = !card;
         $('#a-card-hint', sheet).hidden = !card;
     };
-    $('#a-type', sheet).onchange = paintCard;
+    $('#a-card-toggle', sheet).onchange = paintCard;
     paintCard();
     if (account) {
+        const adjust = $('#a-adjust', sheet);
+        if (adjust) adjust.onclick = () => openBalanceAdjust(account);
         $('#a-del', sheet).onclick = async () => {
             if (await confirmDialog(`Excluir a conta “${account.name}”? Contas com lançamentos não podem ser excluídas — arquive-as.`, {okLabel: 'Excluir'}))
                 run(() => api(`/accounts/${account.id}`, {method: 'DELETE'}), 'Conta excluída');
@@ -611,7 +613,8 @@ function openAccountSheet(account) {
         const typed = $('#a-balance', sheet).value.trim();
         const initialBalance = typed ? parseAmount(typed) : 0;
         if (Number.isNaN(initialBalance)) return toast('Saldo inicial inválido.');
-        const type = $('#a-type', sheet).value;
+        // sem o seletor de tipo: só "cartão ou não"; uma conta antiga mantém o tipo que já tinha
+        const type = $('#a-card-toggle', sheet).checked ? 'CREDIT_CARD' : (account && account.type !== 'CREDIT_CARD' ? account.type : 'CHECKING');
         const closingDay = Number($('#a-closing', sheet).value), dueDay = Number($('#a-due', sheet).value);
         if (type === 'CREDIT_CARD' && !(Number.isInteger(closingDay) && closingDay >= 1 && closingDay <= 31
                 && Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31)) {
@@ -622,6 +625,41 @@ function openAccountSheet(account) {
             archived: account ? $('#a-archived', sheet).checked : false,
             closingDay: type === 'CREDIT_CARD' ? closingDay : null, dueDay: type === 'CREDIT_CARD' ? dueDay : null};
         run(() => api(account ? `/accounts/${account.id}` : '/accounts', {method: account ? 'PUT' : 'POST', body}), 'Conta salva');
+    };
+}
+
+/** "Corrigir saldo": a pessoa digita o saldo real e o app registra a diferença (não conta como receita nem despesa). */
+function openBalanceAdjust(account) {
+    const current = Number(account.balance);
+    const sheet = openSheet(`
+        <h2>Corrigir saldo</h2>
+        <p class="small muted sheet-sub">${esc(account.name)} · saldo no app: ${money(current)}</p>
+        <form id="adj-form" novalidate>
+            <div class="field"><label for="adj-balance">Saldo atual de verdade (${esc(currencySymbol())})</label>
+                <input class="amount-input" id="adj-balance" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(account.balance)}"></div>
+            <p class="small center" id="adj-diff" aria-live="polite"></p>
+            ${tip('adjust-balance', 'O app guarda a diferença como uma “Correção de saldo” (aparece na lista de lançamentos e no resumo do mês, à parte das receitas e despesas). Se errar, é só excluir esse lançamento.')}
+            <div class="form-actions"><button type="button" class="btn" id="adj-cancel">Voltar</button><button type="submit" class="btn primary">Corrigir</button></div>
+        </form>`);
+    const field = $('#adj-balance', sheet), diffBox = $('#adj-diff', sheet);
+    const paint = () => {
+        const typed = field.value.trim() ? parseAmount(field.value) : NaN;
+        if (Number.isNaN(typed)) { diffBox.textContent = ''; return; }
+        const diff = Math.round((typed - current) * 100) / 100;
+        diffBox.className = 'small center ' + (diff > 0 ? 'income' : diff < 0 ? 'expense' : 'muted');
+        diffBox.textContent = diff === 0 ? 'O saldo já é esse.' : diff > 0 ? `Vai somar ${money(diff)} ao saldo.` : `Vai tirar ${money(-diff)} do saldo.`;
+    };
+    field.addEventListener('input', paint);
+    paint();
+    field.focus();
+    field.select();
+    $('#adj-cancel', sheet).onclick = () => openAccountSheet(account);
+    $('#adj-form', sheet).onsubmit = e => {
+        e.preventDefault();
+        const typed = field.value.trim() ? parseAmount(field.value) : NaN;
+        if (Number.isNaN(typed)) return toast('Informe o saldo atual.');
+        if (Math.round((typed - current) * 100) === 0) return toast('O saldo já é esse.');
+        run(() => api(`/accounts/${account.id}/adjust-balance`, {method: 'POST', body: {balance: typed}}), 'Saldo corrigido');
     };
 }
 
@@ -776,6 +814,7 @@ function renderGoals() {
         const balance = Number(p.balance), goal = p.goal == null ? null : Number(p.goal);
         const pct = goal ? Math.min(100, (balance / goal) * 100) : null;
         let hint = p.mode === 'FIXED' ? `${money(p.monthlyAmount)} por mês` : 'Aportes manuais';
+        if (p.accountName) hint += ` · ${p.accountName}`;
         if (goal && balance < goal && p.mode === 'FIXED' && Number(p.monthlyAmount) > 0) {
             hint += ` · meta em ~${Math.ceil((goal - balance) / Number(p.monthlyAmount))} meses`;
         } else if (goal && balance >= goal) {
@@ -830,6 +869,10 @@ function openPotSheet(pot) {
                 <div class="seg" id="p-mode"><button type="button" data-mode="FIXED">Valor fixo por mês</button><button type="button" data-mode="VARIABLE">Eu aporto quando quiser</button></div></div>
             <div class="field" id="p-monthly-field"><label for="p-monthly">Aporte mensal (${currencySymbol()})</label><input id="p-monthly" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.monthlyAmount)}">
                 <span class="small muted">Entra sozinho no dia 1 de cada mês, a partir do mês de início. É uma reserva: o dinheiro continua na sua conta.</span></div>
+            <div class="field"><label for="p-account">Banco / conta</label>
+                <select id="p-account"><option value="">Nenhum (sem vínculo)</option>${orderedAccounts(state.accounts.filter(a => a.type !== 'CREDIT_CARD' && (!a.archived || a.id === pot?.accountId))).map(a =>
+                    `<option value="${a.id}" ${a.id === pot?.accountId ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select>
+                <span class="small muted">Onde esse dinheiro está guardado (ex.: a caixinha do Nubank). É só um vínculo para você saber onde ele está: o dinheiro continua na conta.</span></div>
             <div class="grid2">
                 <div class="field"><label for="p-goal">Meta (opcional)</label><input id="p-goal" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.goal)}"></div>
                 <div class="field"><label for="p-start">Começa em</label><select id="p-start" ${pot ? 'disabled' : ''}>${monthOptions(monthRange(shiftMonth(current, -12), 19), pot?.startMonth || current)}</select></div>
@@ -865,7 +908,8 @@ function openPotSheet(pot) {
         if (mode === 'FIXED' && !(monthly > 0)) return toast('Informe o aporte mensal.');
         if (goalText && !(goal > 0)) return toast('A meta deve ser maior que zero.');
         const body = {name, color: colorOf(), icon: icon(), goal, mode, monthlyAmount: monthly,
-            startMonth: pot ? pot.startMonth : $('#p-start', sheet).value, active: $('#p-active', sheet).checked};
+            startMonth: pot ? pot.startMonth : $('#p-start', sheet).value, active: $('#p-active', sheet).checked,
+            accountId: nextId($('#p-account', sheet).value)};
         run(() => api(pot ? `/pots/${pot.id}` : '/pots', {method: pot ? 'PUT' : 'POST', body}), 'Caixinha salva');
     };
 }
@@ -877,6 +921,7 @@ async function openPotDetail(pot) {
     const sheet = openSheet(`
         <h2>${esc(pot.name)}</h2>
         <div class="pot-balance">${money(pot.balance)}${pot.goal != null ? `<span class="muted"> de ${money(pot.goal)}</span>` : ''}</div>
+        ${pot.accountName ? `<p class="small muted" style="margin:-4px 0 10px">Guardado em ${esc(pot.accountName)}</p>` : ''}
         <div class="form-actions" style="margin-bottom:12px">
             <button type="button" class="btn" id="pd-withdraw">Retirar</button>
             <button type="button" class="btn primary" id="pd-deposit">Aportar</button>
@@ -970,6 +1015,9 @@ function openBuySheet(item) {
             <input class="amount-input" id="b2-price" inputmode="decimal" placeholder="0,00" autocomplete="off" aria-label="Preço pago" value="${fmtInput(item.estimatedPrice)}">
             <p class="small muted center">${item.estimatedPrice != null ? `Estimado: ${money(item.estimatedPrice)}. ` : ''}Informe o preço real que você pagou.</p>
             ${dateField('b2-date', todayIso(), 'Data da compra')}
+            <div class="field"><label for="b2-inst">Parcelas${info('Em quantas vezes foi paga. O preço acima é o total: a 1ª parcela entra na data da compra e as outras ficam “a pagar” nos meses seguintes (no cartão de crédito, todas já entram na fatura).')}</label>
+                <input id="b2-inst" type="number" inputmode="numeric" min="1" max="60" step="1" value="1" aria-label="Número de parcelas"></div>
+            <p class="small muted center" id="b2-inst-hint" hidden></p>
             <div class="grid2">
                 <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account" data-create="account">${accountOptions(defaultAccount)}</select></div>
                 <div class="field"><label for="b2-method">Forma de pagamento</label><select id="b2-method" data-create="method">${options(state.methods, null, {none: '—'})}</select></div>
@@ -979,19 +1027,44 @@ function openBuySheet(item) {
             <div class="form-actions"><button type="submit" class="btn primary">Registrar compra</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'b2-date');
+    // mostra o valor de cada parcela enquanto a pessoa digita
+    const paintInstallments = () => {
+        const n = Number($('#b2-inst', sheet).value || 1), total = parseAmount($('#b2-price', sheet).value);
+        const hint = $('#b2-inst-hint', sheet);
+        hint.hidden = !(n > 1 && total > 0);
+        if (!hint.hidden) hint.textContent = `${n}× de ${money(Math.floor(total * 100 / n) / 100)} (a primeira pode ter alguns centavos a mais)`;
+    };
+    $('#b2-inst', sheet).addEventListener('input', paintInstallments);
+    $('#b2-price', sheet).addEventListener('input', paintInstallments);
     $('#b2-form', sheet).onsubmit = e => {
         e.preventDefault();
         const price = parseAmount($('#b2-price', sheet).value);
         if (!(price > 0)) return toast('Informe o preço pago.');
         if (!dateValue()) return toast('Informe uma data válida.');
+        const installments = Number($('#b2-inst', sheet).value || 1);
+        if (!Number.isInteger(installments) || installments < 1 || installments > 60) return toast('Informe de 1 a 60 parcelas.');
         run(() => api(`/wishes/${item.id}/buy`, {method: 'POST', body: {
-            price, date: dateValue(),
+            price, date: dateValue(), installments,
             accountId: Number($('#b2-account', sheet).value),
             paymentMethodId: nextId($('#b2-method', sheet).value),
             categoryId: nextId($('#b2-category', sheet).value),
             usePot: pot ? $('#b2-pot', sheet).checked : false
         }}), 'Compra registrada');
     };
+}
+
+/** "Sobre o Projeto": */
+function openAboutProject() {
+    const sheet = openSheet(`
+        <h2>Sobre o Projeto</h2>
+        <div class="stack-tight about-project">
+            <p>Esse projeto é open source e completamente gratuito</p>
+            <p>Se você tiver alguma ideia de melhoria, pode me mandar lá no
+                <a href="https://github.com/Kaic-Furushima/expense-tracker" target="_blank" rel="noopener noreferrer">repositório do projeto</a>
+                ou direto no meu e-mail: <a href="mailto:kaic.fbs@gmail.com">kaic.fbs@gmail.com</a>.</p>
+        </div>
+        <div class="form-actions"><button type="button" class="btn primary" id="ap-close">Fechar</button></div>`);
+    $('#ap-close', sheet).onclick = closeSheet;
 }
 
 /* ---------- Trash ---------- */
@@ -1075,8 +1148,7 @@ function quickCreate(kind, {categoryKind = 'EXPENSE'} = {}) {
             <h2>${title}</h2>
             <form id="qc-form" novalidate>
                 <div class="field"><label for="qc-name">Nome</label><input id="qc-name" maxlength="80" autocomplete="off"></div>
-                ${kind === 'account' ? `<div class="field"><label for="qc-type">Tipo</label><select id="qc-type">${Object.entries(ACCOUNT_TYPES).map(([k, v]) =>
-                    `<option value="${k}">${v}</option>`).join('')}</select></div>
+                ${kind === 'account' ? `<label class="switch-row"><input type="checkbox" id="qc-type"><span>É um cartão de crédito</span></label>
                     <div class="grid2" id="qc-card" hidden>
                         <div class="field"><label for="qc-closing">Dia de fechamento</label><input id="qc-closing" inputmode="numeric" maxlength="2" placeholder="Ex.: 10"></div>
                         <div class="field"><label for="qc-due">Dia de vencimento</label><input id="qc-due" inputmode="numeric" maxlength="2" placeholder="Ex.: 20"></div></div>` : ''}
@@ -1108,7 +1180,7 @@ function quickCreate(kind, {categoryKind = 'EXPENSE'} = {}) {
         $('#qc-cancel', root).onclick = () => done(null);
         $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) done(null); });
         const type = $('#qc-type', root);
-        if (type) type.onchange = () => { $('#qc-card', root).hidden = type.value !== 'CREDIT_CARD'; };
+        if (type) type.onchange = () => { $('#qc-card', root).hidden = !type.checked; };
         $('#qc-form', root).onsubmit = async e => {
             e.preventDefault();
             const name = $('#qc-name', root).value.trim();
@@ -1119,10 +1191,10 @@ function quickCreate(kind, {categoryKind = 'EXPENSE'} = {}) {
                     created = await api('/categories', {method: 'POST', body: {name, icon, color: colorOf(), kind: categoryKind}});
                     state.categories = await api('/categories');
                 } else if (kind === 'account') {
-                    const card = type.value === 'CREDIT_CARD';
+                    const card = type.checked;
                     const closingDay = Number($('#qc-closing', root).value), dueDay = Number($('#qc-due', root).value);
                     if (card && !(closingDay >= 1 && closingDay <= 31 && dueDay >= 1 && dueDay <= 31)) return toast('Informe o dia de fechamento e o de vencimento (de 1 a 31).');
-                    created = await api('/accounts', {method: 'POST', body: {name, type: type.value, color: colorOf(), icon: 'bank', initialBalance: 0,
+                    created = await api('/accounts', {method: 'POST', body: {name, type: card ? 'CREDIT_CARD' : 'CHECKING', color: colorOf(), icon: 'bank', initialBalance: 0,
                         parentId: null, archived: false, closingDay: card ? closingDay : null, dueDay: card ? dueDay : null}});
                     state.accounts = await api('/accounts');
                 } else {

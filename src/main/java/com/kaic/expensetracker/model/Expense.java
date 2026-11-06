@@ -2,6 +2,7 @@ package com.kaic.expensetracker.model;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
@@ -89,6 +90,23 @@ public class Expense extends SyncEntity {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
+
+    /**
+     * A "correção de saldo": it moves the account balance to the value the person typed, but it is neither income nor
+     * expense in the month's totals. Nullable on purpose (devices on an older sync version send rows without it).
+     */
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @Column(name = "adjustment")
+    private Boolean adjustment = false;
+
+    public boolean isAdjustment() {
+        return Boolean.TRUE.equals(adjustment);
+    }
+
+    public void setAdjustment(boolean adjustment) {
+        this.adjustment = adjustment;
+    }
 
     public TransactionType getType() {
         return type == null ? TransactionType.EXPENSE : type;

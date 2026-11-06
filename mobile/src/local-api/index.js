@@ -102,6 +102,7 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     r.post('/accounts', ({body}) => created(catalog.createAccount(body ?? {})));
     r.put('/accounts/:id', ({params, body}) => catalog.updateAccount(Number(params.id), body ?? {}));
     r.delete('/accounts/:id', ({params}) => catalog.deleteAccount(Number(params.id)));
+    r.post('/accounts/:id/adjust-balance', ({params, body}) => catalog.adjustBalance(Number(params.id), body ?? {}));
 
     r.get('/tags', () => catalog.tagNames());
 

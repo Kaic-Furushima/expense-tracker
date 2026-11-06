@@ -3,7 +3,7 @@ import {Access} from './access.js';
 import {createBackupHttp} from './backups-http.js';
 import {createReportsHttp} from './reports-http.js';
 import {createApi} from './local-api/index.js';
-import {installNativeFiles} from './native-files.js';
+import {createNativeBackupFolder, installNativeFiles} from './native-files.js';
 import {installNativeBack} from './native-back.js';
 import {installNativeNotifications} from './native-notifications.js';
 import {MAIN, Profiles} from './profiles.js';
@@ -104,6 +104,11 @@ async function start() {
     const SQL = await initSqlJs({locateFile: file => `/js/${file}`});
     const idb = await openIdb();
     const backupBase = idbBackupStore(idb);
+    // pasta de backups escolhida pela pessoa (fora do app); vale para todos os perfis. null no navegador comum.
+    const backupFolder = createNativeBackupFolder({
+        get: () => kvGet(idb, 'backup-folder'),
+        set: value => (value ? kvPut(idb, 'backup-folder', value) : kvDelete(idb, 'backup-folder'))
+    });
 
     /** Abre (ou cria) o banco de um perfil: grava o arquivo pouco depois de cada alteracao (agrupando varias seguidas) e ao sair do app. */
     async function openRuntime(id, languageStore) {
@@ -125,7 +130,10 @@ async function start() {
         const api = createApi(stored ? new SQL.Database(new Uint8Array(stored)) : new SQL.Database(), {persist, languageStore});
         return {
             id, api, flush: writeNow,
-            backups: createBackupHttp({backup: api.services.backup, store: scopedBackupStore(backupBase, id)}),
+            backups: createBackupHttp({
+                backup: api.services.backup, store: scopedBackupStore(backupBase, id),
+                folder: backupFolder, folderPrefix: id === MAIN ? '' : `${id}_`
+            }),
             reportsHttp: createReportsHttp({reports: api.services.reports}),
             close() { writeNow(); api.db.close(); }
         };

@@ -489,7 +489,7 @@ function txRow(t) {
         ${state.sel.on ? `<span class="sel-box ${picked ? 'on' : ''}">${picked ? ico('check') : ''}</span>` : ''}
         ${avatar(t.categoryIcon, t.categoryColor)}
         <span class="grow"><span class="title">${esc(t.name)}</span>
-        <span class="small muted">${esc(txCategoryLabel(t))} · ${esc(t.accountName || '')}${t.paymentMethodName ? ' · ' + esc(t.paymentMethodName) : ''}<span class="tags">${flag}${tags}</span></span></span>
+        <span class="small muted">${esc(t.adjustment ? 'Correção de saldo' : txCategoryLabel(t))} · ${esc(t.accountName || '')}${t.paymentMethodName ? ' · ' + esc(t.paymentMethodName) : ''}<span class="tags">${flag}${tags}</span></span></span>
         <span class="amount ${income ? 'income' : 'expense'}">${income ? '+' : '−'} ${money(t.amount)}</span>
     </button>`;
 }
@@ -580,6 +580,7 @@ function renderHome() {
             <div class="hero-row">
                 <div class="hero-pill"><div class="label">${ico('arrow-up')} Receitas</div><div class="v">${money(s.income)}</div></div>
                 <div class="hero-pill"><div class="label">${ico('arrow-down')} Despesas</div><div class="v">${money(s.expense)}</div></div>
+                ${Number(s.adjustment) ? `<div class="hero-pill wide" title="Correção de saldo: a diferença entre o saldo do app e o saldo real, anotada à parte (não é receita nem despesa)"><div class="label">${ico('pencil')} Correções</div><div class="v">${Number(s.adjustment) > 0 ? '+ ' : '− '}${money(Math.abs(Number(s.adjustment)))}</div></div>` : ''}
             </div>
             <div class="hero-note">${esc(note)}</div>
             ${forecast}

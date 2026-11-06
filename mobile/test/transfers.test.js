@@ -101,7 +101,7 @@ describe('lixeira', () => {
         now = new Date(2026, 4, 15, 13, 0, 0);
         ok('DELETE', `/transfers/${t.id}`);
         const items = ok('GET', '/trash');
-        assert.deepEqual(items.map(i => [i.kind, i.name, i.amount, i.detail]),
+        assert.deepEqual(items.map(i => [i.kind, i.title, i.amount, i.detail]),
             [['TRANSFER', 'Transferência', 50, 'Conta principal → Reserva'], ['EXPENSE', 'Almoço', 30, 'Conta principal · Alimentação']]);
     });
 
@@ -146,7 +146,7 @@ describe('lixeira', () => {
         now = new Date(2026, 5, 20, 12, 0, 0); // 36 dias depois
         ok('DELETE', `/expenses/${recent.id}`);
         api.services.trash.purgeExpired();
-        assert.deepEqual(ok('GET', '/trash').map(i => i.name), ['Recente']);
+        assert.deepEqual(ok('GET', '/trash').map(i => i.title), ['Recente']);
     });
 
     it('limpar tudo manda tambem as transferencias para a lixeira', () => {

@@ -18,10 +18,11 @@ export class Summary {
 
     /** Totais agrupados por mes, tipo, situacao, categoria e conta entre dois meses (inclusive). */
     totalsBetween(from, to) {
-        return this.db.all(`select substr(date, 1, 7) month, type, status, category_id, account_id, sum(amount_cents) cents, count(*) n
+        return this.db.all(`select substr(date, 1, 7) month, type, status, category_id, account_id, coalesce(adjustment, 0) adjustment,
+                                   sum(amount_cents) cents, count(*) n
                             from expenses where deleted_at is null and date between ? and ?
-                            group by 1, 2, 3, 4, 5`, [firstDay(from), lastDay(to)])
-            .map(r => ({month: r.month, income: r.type === 'INCOME', paid: r.status !== 'PENDING',
+                            group by 1, 2, 3, 4, 5, 6`, [firstDay(from), lastDay(to)])
+            .map(r => ({month: r.month, income: r.type === 'INCOME', paid: r.status !== 'PENDING', adjustment: !!r.adjustment,
                 categoryId: r.category_id, accountId: r.account_id, cents: r.cents, count: r.n}));
     }
 
@@ -29,12 +30,14 @@ export class Summary {
         const totals = this.totalsBetween(addMonths(month, -ROLLOVER_MAX_MONTHS), month);
         const spend = spendByMonth(totals);
         const inAccount = b => accountId == null || accountId === b.accountId;
-        const sum = (rows, income, paid) => rows.filter(b => b.income === income && b.paid === paid).reduce((s, b) => s + b.cents, 0);
+        // "correcao de saldo": nao e receita nem despesa; aparece a parte e entra no saldo do mes
+        const sum = (rows, income, paid) => rows.filter(b => !b.adjustment && b.income === income && b.paid === paid).reduce((s, b) => s + b.cents, 0);
 
         const scoped = totals.filter(b => b.month === month && inAccount(b));
         const income = sum(scoped, true, true);
         const spent = sum(scoped, false, true);
-        const balance = income - spent;
+        const adjustment = scoped.filter(b => b.adjustment && b.paid).reduce((s, b) => s + (b.income ? b.cents : -b.cents), 0);
+        const balance = income - spent + adjustment;
 
         let pendingIncome = sum(scoped, true, false);
         let pendingExpense = sum(scoped, false, false);
@@ -59,7 +62,7 @@ export class Summary {
         const monthSpend = spendOf(month, spend);
 
         const byCategory = new Map();
-        scoped.filter(b => !b.income && b.paid).forEach(b => {
+        scoped.filter(b => !b.income && b.paid && !b.adjustment).forEach(b => {
             const t = byCategory.get(b.categoryId) ?? {total: 0, count: 0};
             byCategory.set(b.categoryId, {total: t.total + b.cents, count: t.count + b.count});
         });
@@ -88,7 +91,7 @@ export class Summary {
 
         const c = fromCents;
         return {
-            month, income: c(income), expense: c(spent), balance: c(balance), previousExpense: c(previousSpent),
+            month, income: c(income), expense: c(spent), balance: c(balance), adjustment: c(adjustment), previousExpense: c(previousSpent),
             pendingIncome: c(pendingIncome), pendingExpense: c(pendingExpense), projectedBalance: c(projected),
             totalBudget: c(totalBudget), totalBudgetBase: c(totalBase), totalCarry: c(totalCarry), totalSpent: c(monthSpend.total),
             budgetRollover: rollover,
@@ -159,7 +162,7 @@ const spendOf = (month, spend) => spend.get(month) ?? NO_SPEND;
 function spendByMonth(totals) {
     const result = new Map();
     for (const b of totals) {
-        if (b.income || !b.paid) continue;
+        if (b.income || !b.paid || b.adjustment) continue;
         if (!result.has(b.month)) result.set(b.month, {own: new Map(), total: 0});
         const entry = result.get(b.month);
         entry.total += b.cents;
