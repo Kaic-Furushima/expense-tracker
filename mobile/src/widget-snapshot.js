@@ -27,9 +27,12 @@ export function buildSnapshot({api, messages, passwordSet, withPassword, now = D
     const get = url => api.handle('GET', url).body;
 
     const accounts = get('/accounts').filter(a => !a.archived);
-    const total = round2(accounts.reduce((sum, a) => sum + Number(a.balance), 0));
+    // o total e o disponivel; o que esta guardado (contas marcadas como "dinheiro guardado") aparece a parte, embaixo
+    const sumOf = list => round2(list.reduce((sum, a) => sum + Number(a.balance), 0));
+    const total = sumOf(accounts.filter(a => !a.saved));
+    const savedTotal = sumOf(accounts.filter(a => a.saved));
     const balances = [
-        {key: 'total', choice: t('Saldo total'), name: t('Saldo total'), main: money(total), sub: '', progress: -1, negative: total < 0},
+        {key: 'total', choice: t('Saldo total'), name: t('Saldo total'), main: money(total), sub: accounts.some(a => a.saved) ? t('Guardado: {0}', money(savedTotal)) : '', progress: -1, negative: total < 0},
         ...accounts.map(a => ({
             key: `a${a.id}`, choice: a.name, name: a.name, main: money(Number(a.balance)),
             sub: a.parentName ? t('dentro de {0}', a.parentName) : '', progress: -1, negative: Number(a.balance) < 0

@@ -325,5 +325,13 @@ create table trash_snapshots (
     payload text not null
 );`;
 
-export const MIGRATIONS = [V1, syncSchema(), V3, V4, V5];
+/**
+ * "Guardado" vira uma escolha da conta. Aceita nulo de proposito (aparelhos com versao antiga do sync mandam contas sem o campo).
+ * Quem ja ficava dentro de outra conta continua contando como guardado.
+ */
+const V6 = `
+alter table accounts add column saved integer default 0;
+update accounts set saved = 1 where parent_id is not null;`;
+
+export const MIGRATIONS = [V1, syncSchema(), V3, V4, V5, V6];
 export const SCHEMA_VERSION = MIGRATIONS.length;

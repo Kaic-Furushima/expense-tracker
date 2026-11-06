@@ -8,7 +8,7 @@ import {ProfileRegistrySync} from './registry.js';
 // e lembra como foi. Nada aqui acontece na versao "offline" do aplicativo.
 
 const DEFAULT_DEBOUNCE_MS = 8000;
-const OFFLINE_MESSAGE = 'Sem conexão com o servidor de sync. As alterações seguem quando a internet voltar.';
+const OFFLINE_MESSAGE = 'Sem conexão com o sync. As alterações serão enviadas quando a internet voltar.';
 
 /** Estado da conexao guardado fora dos bancos. Os testes usam este; o app, o IndexedDB (browser.js). */
 export class MemorySyncStore {

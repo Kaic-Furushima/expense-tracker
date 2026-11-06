@@ -221,7 +221,7 @@ const offlineCopy = (() => {
     };
 })();
 const profileOf = () => (document.cookie.match(/(?:^|;\s*)profile=([^;]+)/) || [])[1] || 'main';
-const OFFLINE_MESSAGE = 'Sem conexão com o computador. Alterações só funcionam com o computador ligado e na mesma rede.';
+const OFFLINE_MESSAGE = 'Sem conexão com o computador. Para alterar dados, conecte-o à mesma rede.';
 
 /** Shows (or hides, with null) the notice that the screens are using the saved copy. */
 function setOfflineNotice(savedAt) {
@@ -230,7 +230,7 @@ function setOfflineNotice(savedAt) {
     bar.hidden = savedAt == null;
     if (savedAt != null) {
         const when = new Date(savedAt).toLocaleString(LOCALE, {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
-        bar.textContent = `Sem conexão com o computador. Mostrando os dados salvos em ${when}. Alterações só funcionam com o computador ligado.`;
+        bar.textContent = `Sem conexão. Exibindo dados salvos em ${when}; ligue o computador para alterar.`;
     }
 }
 
@@ -565,9 +565,13 @@ function donut(groups, total) {
 /** The big number on the home screen: what is in the accounts right now (or in the chosen account), not the month's result. */
 function homeTotal() {
     const picked = state.accountFilter ? accountById(state.accountFilter) : null;
-    if (picked) return {label: `Saldo de ${esc(picked.name)}`, value: Number(picked.balance), sub: ''};
-    const value = activeAccounts().reduce((sum, a) => sum + Number(a.balance), 0);
-    return {label: 'Saldo total', value, sub: ''};
+    if (picked) return {label: `Saldo de ${esc(picked.name)}`, value: Number(picked.balance), sub: '', color: normalizeHex(picked.color)};
+    // the big number is what is available; what is saved inside accounts (piggy banks, investments) shows small below
+    const active = activeAccounts();
+    const value = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const hasSaved = active.some(a => a.saved);
+    return {label: 'Saldo total', value, sub: hasSaved ? `Guardado: ${esc(money(saved))}` : '', color: ''};
 }
 
 function renderHome() {
@@ -590,14 +594,14 @@ function renderHome() {
 
     $('#view').innerHTML = `<div class="home-grid"><div class="stack home-main">
         ${welcomeCard()}
-        <div class="card hero">
+        <div class="card hero" ${total.color ? `style="--primary:${total.color};--on-primary:${readableOn(total.color)}"` : ''}>
             <div class="label">${total.label}</div>
             <div class="balance ${total.sub ? 'has-sub' : ''}">${money(total.value)}</div>
             ${total.sub ? `<div class="hero-sub">${total.sub}</div>` : ''}
             <div class="hero-row">
                 <div class="hero-pill"><div class="label">${ico('arrow-up')} Receitas</div><div class="v">${money(s.income)}</div></div>
                 <div class="hero-pill"><div class="label">${ico('arrow-down')} Despesas</div><div class="v">${money(s.expense)}</div></div>
-                <div class="hero-pill wide" title="Receitas pagas menos despesas pagas deste mês (mais as correções de saldo). Não inclui o que já estava nas contas antes."><div class="label">Resultado do mês</div><div class="v">${Number(s.balance) > 0 ? '+ ' : Number(s.balance) < 0 ? '− ' : ''}${money(Math.abs(Number(s.balance)))}</div></div>
+                <div class="hero-pill wide" title="Resultado do mês: receitas pagas menos despesas pagas, mais ajustes. Não inclui o saldo anterior das contas."><div class="label">Resultado do mês</div><div class="v">${Number(s.balance) > 0 ? '+ ' : Number(s.balance) < 0 ? '− ' : ''}${money(Math.abs(Number(s.balance)))}</div></div>
                 ${Number(s.adjustment) ? `<div class="hero-pill wide" title="Correção de saldo: a diferença entre o saldo do app e o saldo real, anotada à parte (não é receita nem despesa)"><div class="label">${ico('pencil')} Correções</div><div class="v">${Number(s.adjustment) > 0 ? '+ ' : '− '}${money(Math.abs(Number(s.adjustment)))}</div></div>` : ''}
             </div>
             ${forecast}
@@ -778,7 +782,7 @@ function renderTransactions() {
             <div class="grid2">${dateField('fl-from', f.from, 'Período: de', true)}${dateField('fl-to', f.to, 'até', true)}</div>
             <div class="field"><label for="fl-sort">Ordenar por</label><select id="fl-sort">${SORTS.map(([v, l]) =>
                 `<option value="${v}" ${v === f.sort ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-            <p class="small muted" id="range-note">${rangeActive() ? 'Com um período definido, a lista ignora o mês escolhido no alto da tela (e não mostra transferências).' : 'Sem período, a lista mostra o mês escolhido no alto da tela.'}</p>
+            <p class="small muted" id="range-note">${rangeActive() ? 'Com período definido, a lista ignora o mês selecionado e oculta transferências.' : 'Sem período, a lista mostra o mês escolhido no alto da tela.'}</p>
             <button class="btn block" id="clear-filters" ${count ? '' : 'hidden'}>Limpar filtros</button>
         </div>` : ''}
         <div id="tx-list"></div>
@@ -832,7 +836,7 @@ function refreshFilterChrome() {
     const clear = $('#clear-filters');
     if (clear) clear.hidden = count === 0;
     const note = $('#range-note');
-    if (note) note.textContent = rangeActive() ? 'Com um período definido (ou buscando em todos os meses), a lista ignora o mês escolhido no alto da tela e não mostra transferências.' : 'Sem período, a lista mostra o mês escolhido no alto da tela.';
+    if (note) note.textContent = rangeActive() ? 'Com período ou busca em todos os meses, a lista ignora o mês selecionado e oculta transferências.' : 'Sem período, a lista mostra o mês escolhido no alto da tela.';
 }
 
 /** Income, expenses and balance of the entries on screen (U5). Only paid entries count: pending ones and transfers do not. */
@@ -848,7 +852,7 @@ function totalsStrip(items) {
         <div><span class="small muted">Receitas</span><strong class="income">${money(income)}</strong></div>
         <div><span class="small muted">Despesas</span><strong class="expense">${money(expense)}</strong></div>
         <div><span class="small muted">Saldo</span><strong>${money(income - expense)}</strong></div></div>
-        <p class="small muted tx-totals-note">Só lançamentos pagos entram nestes totais; os que estão a pagar ou a receber ficam de fora.</p>`;
+        <p class="small muted tx-totals-note">Só lançamentos pagos entram nos totais.</p>`;
 }
 
 async function paintTransactions() {
@@ -968,7 +972,7 @@ function renderBudgets() {
         ${totalCard}
         ${withBudget.length ? withBudget.map(card).join('') : `<div class="card empty"><div class="big">${ico('target')}</div>Defina limites mensais por categoria<br>e acompanhe quanto ainda pode gastar.</div>`}
         ${free.length ? `<button class="btn block" id="add-budget">${ico('plus')} Novo orçamento</button>` : ''}
-        <p class="small muted center">Um limite vale a partir do mês em que foi definido, até você mudá-lo — mudar o de um mês não altera os anteriores.${s.budgetRollover ? ' A sobra (ou o estouro) de cada mês passa para o seguinte.' : ''}</p>
+        <p class="small muted center">O limite vale a partir do mês definido e não altera meses anteriores.${s.budgetRollover ? ' A sobra (ou o estouro) de cada mês passa para o seguinte.' : ''}</p>
     </div>`;
     $$('[data-cat]').forEach(b => b.onclick = () => openBudgetSheet(Number(b.dataset.cat)));
     $('#total-budget').onclick = () => openBudgetSheet('total');
@@ -1140,10 +1144,10 @@ function openTransactionSheet(item, prefill) {
                 <div class="field"><label for="f-from">De</label><select id="f-from" data-create="account">${accountOptions(fromDefault)}</select></div>
                 <div class="field"><label for="f-to">Para</label><select id="f-to" data-create="account">${accountOptions(toDefault)}</select></div>
             </div>
-            <div data-for="transfer">${tip('transfer', `Mover dinheiro entre contas não é receita nem despesa. Para registrar um investimento, transfira para a conta (ou parte dela) onde ele fica guardado.`)}</div>
+            <div data-for="transfer">${tip('transfer', `Transferências entre contas não são receitas nem despesas. Para investir, transfira para a conta onde o dinheiro ficará guardado.`)}</div>
             ${dateField('f-date', date, 'Data')}
             <div data-for="repeat" hidden>
-                <label class="switch-row"><input type="checkbox" id="f-repeat"><span>Repetir todo mês${info('Cria um pagamento recorrente: ele se repete sozinho todo mês, no mesmo dia, sem você lançar de novo. Depois dá para ver, pausar ou editar em Mais → Pagamentos recorrentes. Se o desconto automático estiver ligado nas configurações, ele é pago no dia do vencimento; senão fica em “A pagar” até você confirmar.')}</span></label>
+                <label class="switch-row"><input type="checkbox" id="f-repeat"><span>Repetir todo mês${info('Pagamentos recorrentes se repetem todo mês. Gerencie em Mais → Pagamentos recorrentes. Com o desconto automático, são pagos no vencimento; sem ele, precisam de confirmação.')}</span></label>
                 <div id="f-repeat-opts" hidden>
                     <div class="field"><label for="f-repeat-end">Termina em</label><select id="f-repeat-end"></select></div>
                     <span class="small muted" id="f-repeat-hint"></span>
@@ -1218,7 +1222,7 @@ function openTransactionSheet(item, prefill) {
             del.type = 'button'; del.className = 'btn danger'; del.style.gridColumn = '1 / -1';
             del.textContent = T('Excluir categoria “{}”').replace('{}', chosenCat.name);
             del.onclick = async () => {
-                if (!await confirmDialog(`Excluir a categoria “${chosenCat.name}”? Os lançamentos ficam sem categoria.`, {okLabel: 'Excluir'})) return;
+                if (!await confirmDialog(`Excluir a categoria “${chosenCat.name}”?`, {okLabel: 'Excluir'})) return;
                 try {
                     await api(`/categories/${chosenCat.id}`, {method: 'DELETE'});
                     state.categories = await api('/categories');
@@ -1365,7 +1369,7 @@ function openTransactionSheet(item, prefill) {
         if (planMode === 'cycle') {
             box.innerHTML = `<div class="field"><label for="f-cycle">Dias do vencimento, em ciclo</label>
                 <input id="f-cycle" inputmode="numeric" maxlength="40" placeholder="Ex.: 2, 3" autocomplete="off" value="${esc(planOpts.days)}">
-                <span class="small muted">Cada parcela usa o próximo dia da lista; no fim, volta ao primeiro (2, 3 → 2, 3, 2, 3…).</span></div>`;
+                <span class="small muted">As parcelas seguem os dias da lista e reiniciam pelo primeiro (2, 3, 2, 3…).</span></div>`;
             $('#f-cycle', sheet).oninput = e => { planOpts.days = e.target.value; rebuildPlan(); paintPlanRows(); };
         } else if (planMode === 'rule') {
             const weekdays = Array.from({length: 7}, (_, d) => new Date(2024, 0, 7 + d).toLocaleDateString(LOCALE, {weekday: 'long'}));
@@ -1462,7 +1466,7 @@ function openTransactionSheet(item, prefill) {
     if (editing) {
         $('#f-del', sheet).onclick = async () => {
             const what = isTransfer ? 'esta transferência' : `“${item.name}”`;
-            if (!await confirmDialog(`Mover ${what} para a lixeira? Dá para restaurar em Mais → Lixeira.`, {okLabel: 'Mover para a lixeira'})) return;
+            if (!await confirmDialog(`Mover ${what} para a lixeira?`, {okLabel: 'Mover para a lixeira'})) return;
             const kind = isTransfer ? 'TRANSFER' : 'EXPENSE';
             run(() => api(isTransfer ? `/transfers/${item.id}` : `/expenses/${item.id}`, {method: 'DELETE'}),
                 {text: 'Movido para a lixeira', undo: () => api(`/trash/${kind}/${item.id}/restore`, {method: 'POST'})});
@@ -1569,8 +1573,7 @@ function openCategorySheet(cat, newKind = null) {
     if (cat) {
         $('#c-copy', sheet).onclick = () => run(() => api(`/categories/${cat.id}/copy`, {method: 'POST'}), `Copiada para ${otherName}`);
         $('#c-del', sheet).onclick = async () => {
-            const extra = hasChildren ? ' As subcategorias viram categorias principais.' : '';
-            if (await confirmDialog(`Excluir a categoria “${cat.name}”? Os lançamentos ficam sem categoria.${extra}`, {okLabel: 'Excluir'}))
+            if (await confirmDialog(`Excluir a categoria “${cat.name}”?`, {okLabel: 'Excluir'}))
                 run(() => api(`/categories/${cat.id}`, {method: 'DELETE'}), 'Categoria excluída');
         };
     }
@@ -1614,7 +1617,7 @@ function openBudgetSheet(target) {
     const base = () => isTotal ? '/budgets/total' : `/budgets/${target || Number($('#b-cat', sheet).value)}`;
     if (exists) {
         $('#b-del', sheet).onclick = async () => {
-            if (await confirmDialog(`Remover o limite a partir de ${monthName}? Os meses anteriores continuam com o limite que tinham.`, {okLabel: 'Remover'}))
+            if (await confirmDialog(`Remover o limite a partir de ${monthName}? Os meses anteriores não mudam.`, {okLabel: 'Remover'}))
                 run(() => api(`${base()}?month=${state.month}`, {method: 'DELETE'}), 'Limite removido');
         };
     }
@@ -1675,7 +1678,7 @@ function showLogin() {
         </form></div>`;
     const forgot = $('#forgot-pass');
     if (forgot) forgot.onclick = async () => { // Android app: there is no file to delete, so forgetting means starting over
-        if (!await confirmDialog('Apagar TODOS os dados deste aparelho (lançamentos, contas, perfis e backups guardados no app) e remover a senha? Não dá para desfazer: só um backup guardado fora do app recupera os dados.', {okLabel: 'Apagar tudo'})) return;
+        if (!await confirmDialog('Apagar todos os dados e remover a senha? Não é possível desfazer; só um backup externo recupera os dados.', {okLabel: 'Apagar tudo'})) return;
         try {
             await api('/api/auth/reset', {method: 'POST', body: {confirm: true}});
             safeStorage.set('account', '');

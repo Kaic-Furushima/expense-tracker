@@ -53,15 +53,15 @@ function renderProfilesPage() {
     const p = state.profiles;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Perfis')}
         <p class="small muted">${window.localApp
-            ? 'Cada perfil tem os seus próprios lançamentos, contas, categorias, orçamentos e backups, separados dos outros. A senha, se houver, vale para todos os perfis e quem abrir o app pode trocar de perfil.'
-            : 'Cada perfil tem os seus próprios lançamentos, contas, categorias, orçamentos e backups, separados dos outros. Não há senha: quem abrir o app pode trocar de perfil.'}</p>
+            ? 'Os perfis têm dados separados. A senha vale para todos, mas qualquer pessoa pode trocar de perfil.'
+            : 'Cada perfil tem dados próprios. Não há senha; qualquer pessoa pode trocar de perfil.'}</p>
         <div class="list">${p.profiles.map(x => `<button class="row" data-profile="${x.id}">${profileAvatar(x)}
             <span class="grow"><span class="title">${esc(x.name)}</span>${x.id === p.current ? '<span class="small muted">Em uso agora</span>' : ''}</span>
             <span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-profile"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Novo perfil</span></button>
         </div>
         ${(p.trashed || []).length ? `<h2 class="section-title">Lixeira de perfis</h2>
-            <p class="small muted">Perfis removidos ficam aqui até você restaurar ou excluir de vez. Nada é apagado antes disso.</p>
+            <p class="small muted">Perfis removidos ficam aqui até restaurar ou excluir. Nada é apagado antes disso.</p>
             <div class="list">${p.trashed.map(x => `<button class="row" data-trashed="${x.id}">${profileAvatar(x)}
                 <span class="grow"><span class="title">${esc(x.name)}</span><span class="small muted">Removido em ${new Date(x.trashedAt).toLocaleDateString()}</span></span>
                 <span class="muted">${ico('trash')}</span></button>`).join('')}</div>` : ''}</div>`;
@@ -79,7 +79,7 @@ function openProfileSheet(profile) {
         <form id="pf-form">
             <div class="field"><label for="pf-name">Nome</label>
                 <input id="pf-name" maxlength="40" autocomplete="off" required value="${esc(profile ? profile.name : '')}" placeholder="Ex.: Maria"></div>
-            ${profile ? '' : '<p class="small muted">O perfil novo começa vazio, com as categorias e formas de pagamento padrão, e você passa a usá-lo na hora.</p>'}
+            ${profile ? '' : '<p class="small muted">O perfil começa vazio, com categorias e formas de pagamento padrão.</p>'}
             <div class="form-actions">
                 ${profile && !isMain ? '<button type="button" class="btn danger" id="pf-del">Mover para a lixeira</button>' : ''}
                 ${profile && !isCurrent ? '<button type="button" class="btn" id="pf-use">Usar este perfil</button>' : ''}
@@ -112,7 +112,7 @@ function openProfileSheet(profile) {
     const del = $('#pf-del', sheet);
     if (del) del.onclick = async () => {
         const sync = state.sync && state.sync.configured ? ' Com o sync ligado, ele também vai para a lixeira nos seus outros aparelhos.' : '';
-        if (!await confirmDialog(`Mover o perfil “${profile.name}” para a lixeira? Nada é apagado: você pode restaurá-lo ou excluí-lo de vez depois, em Perfis › Lixeira de perfis.${sync}`, {okLabel: 'Mover para a lixeira', danger: false})) return;
+        if (!await confirmDialog(`Mover o perfil “${profile.name}” para a lixeira? Você pode restaurá-lo ou excluí-lo em Perfis › Lixeira.${sync}`, {okLabel: 'Mover para a lixeira', danger: false})) return;
         try {
             await api(`/profiles/${profile.id}`, {method: 'DELETE'});
             safeStorage.set('account', '');
@@ -140,8 +140,8 @@ function openTrashedProfileSheet(profile) {
         } catch (err) { toast(err.message); }
     };
     $('#pt-purge', sheet).onclick = async () => {
-        const sync = state.sync && state.sync.configured ? ' Com o sync ligado, ele também será excluído de vez dos seus outros aparelhos e da nuvem.' : '';
-        if (!await confirmDialog(`Excluir de vez o perfil “${profile.name}”? Os lançamentos, contas e backups dele deixam de existir no app.${sync} Não tem volta.`, {okLabel: 'Excluir de vez'})) return;
+        const sync = state.sync && state.sync.configured ? ' Com o sync ligado, o perfil também será excluído dos outros aparelhos e da nuvem.' : '';
+        if (!await confirmDialog(`Excluir permanentemente o perfil “${profile.name}”? Lançamentos, contas e backups serão apagados.${sync}`, {okLabel: 'Excluir de vez'})) return;
         try {
             state.profiles = await api(`/profiles/${profile.id}/purge`, {method: 'DELETE'});
             closeSheet();

@@ -73,6 +73,7 @@ const CATALOG = new Map([
     ['Abra o app para ativar o widget.', ['Open the app to activate the widget.', 'Abre la app para activar el widget.']],
     ['Saldo total', ['Total balance', 'Saldo total']],
     ['dentro de {0}', ['inside {0}', 'dentro de {0}']],
+    ['Guardado: {0}', ['Saved: {0}', 'Guardado: {0}']],
     ['Orçamento', ['Budget', 'Presupuesto']],
     ['Geral', ['Overall', 'General']],
     ['restante de {0}', ['left of {0}', 'restante de {0}']],

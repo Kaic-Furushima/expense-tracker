@@ -19,7 +19,7 @@ export const TABLES = {
     accounts: {
         columns: {
             name: 'text', type: 'text', color: 'text', icon: 'text', initial_cents: 'int', archived: 'int',
-            parent_id: 'fk:accounts', closing_day: 'int', due_day: 'int'
+            parent_id: 'fk:accounts', closing_day: 'int', due_day: 'int', saved: 'int'
         },
         natural: ['name']
     },

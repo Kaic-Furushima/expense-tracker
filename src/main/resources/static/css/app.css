@@ -420,6 +420,14 @@ select { appearance: auto; }
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatch { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--border); }
 .swatch.active { box-shadow: 0 0 0 2px var(--text); }
+.color-custom { flex: 1 1 100%; display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+.color-native { width: 44px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: none; }
+.color-hex { max-width: 130px; font-family: monospace; text-transform: uppercase; }
+.account-sort { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.account-sort button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: .85rem; }
+.account-sort button.active { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.move-btns { display: flex; flex-direction: column; gap: 2px; }
+.move-btns .icon-btn { width: 28px; height: 22px; }
 .emoji-input { margin-top: 8px; }
 
 /* ---- totals above the entries (U5) and category links on Home (U6) ---- */

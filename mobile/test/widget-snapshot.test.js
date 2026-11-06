@@ -19,7 +19,7 @@ beforeEach(() => {
     api = createApi(new SQL.Database(), {clock: () => new Date(2026, 4, 15, 12), newId: () => `w-${++n}`});
     const main = ok('GET', '/accounts')[0];
     ok('PUT', `/accounts/${main.id}`, {...main, initialBalance: 1000});
-    ok('POST', '/accounts', {name: 'Reserva', type: 'SAVINGS', parentId: main.id, initialBalance: 500});
+    ok('POST', '/accounts', {name: 'Reserva', type: 'SAVINGS', parentId: main.id, initialBalance: 500, saved: true});
 });
 
 describe('resumo dos widgets', () => {
@@ -39,11 +39,12 @@ describe('resumo dos widgets', () => {
     it('saldo total e saldo de cada conta (o saldo atual, nao o do mes)', () => {
         const s = snapshot();
         assert.deepEqual(s.balances.map(b => [b.key, b.name, norm(b.main)]), [
-            ['total', 'Saldo total', 'R$ 1.500,00'],
+            ['total', 'Saldo total', 'R$ 1.000,00'],
             [`a${ok('GET', '/accounts')[0].id}`, 'Conta principal', 'R$ 1.000,00'],
             [`a${ok('GET', '/accounts')[1].id}`, 'Reserva', 'R$ 500,00']
         ]);
         assert.equal(s.balances[2].sub, 'dentro de Conta principal');
+        assert.equal(norm(s.balances[0].sub), 'Guardado: R$ 500,00'); // o guardado fica fora do total e aparece a parte
     });
 
     it('contas arquivadas ficam de fora e saldo negativo e marcado', () => {

@@ -3,7 +3,7 @@
   "private": true,
   "description": "Testes do front-end do Expense Tracker (o aplicativo em si é Java; veja o README).",
   "scripts": {
-    "test": "node --test src/test/js/helpers.test.js"
+    "test": "node --test src/test/js/*.test.js"
   },
   "engines": {
     "node": ">=20"

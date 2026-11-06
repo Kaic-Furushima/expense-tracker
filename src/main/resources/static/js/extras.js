@@ -126,11 +126,11 @@ function runBatch(kind) {
     const ids = [...state.sel.items.keys()];
     if (kind === 'chart') return openChartSheet([...state.sel.items.values()]);
     if (kind === 'paid') {
-        return confirmDialog(`Marcar como pagos os lançamentos “a pagar” entre os ${n} selecionados (a data vira hoje)?`, {okLabel: 'Marcar como pago', danger: false})
+        return confirmDialog(`Marcar como pagos os lançamentos “a pagar” dos ${n} selecionados? A data vira hoje.`, {okLabel: 'Marcar como pago', danger: false})
             .then(ok => ok && batchAction({action: 'MARK_PAID'}, 'Lançamentos marcados como pagos'));
     }
     if (kind === 'delete') {
-        return confirmDialog(`Mover ${n === 1 ? '1 lançamento' : n + ' lançamentos'} para a lixeira? Dá para restaurar em Mais → Lixeira.`, {okLabel: 'Mover para a lixeira'}).then(ok => {
+        return confirmDialog(`Mover ${n === 1 ? '1 lançamento' : n + ' lançamentos'} para a lixeira?`, {okLabel: 'Mover para a lixeira'}).then(ok => {
             if (!ok) return;
             let deleted = ids;
             run(async () => {
@@ -243,7 +243,7 @@ function openReportSheet() {
     const lastDay = new Date(Number(state.month.slice(0, 4)), Number(state.month.slice(5, 7)), 0).getDate();
     const to = f.to || `${state.month}-${pad(lastDay)}`;
     const sheet = openSheet(`<h2>Relatório</h2>
-        <p class="small muted sheet-sub">Extrato do período com resumo, despesas por categoria, todos os lançamentos e as transferências.</p>
+        <p class="small muted sheet-sub">Relatório do período: resumo, despesas por categoria, lançamentos e transferências.</p>
         <div class="grid2">${dateField('r-from', from, 'De')}${dateField('r-to', to, 'Até')}</div>
         <div class="field"><label for="r-account">Conta</label><select id="r-account"><option value="">Todas as contas</option>${orderedAccounts(activeAccounts()).map(a =>
             `<option value="${a.id}" ${a.id === state.accountFilter ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
@@ -295,7 +295,7 @@ async function mountAttachments(sheet, expenseId) {
                 ? `<img src="/attachments/${a.id}" alt="">` : `<span class="attach-file">${ico('file')}<small>PDF</small></span>`}</button>
             <button type="button" class="attach-del" data-del="${a.id}" aria-label="Excluir anexo">${ico('trash')}</button></div>`).join('')}
             ${list.length < 5 ? `<button type="button" class="attach add" id="f-attach-add">${ico('plus')}<small>Foto ou PDF</small></button>` : ''}</div>
-            ${list.length ? '' : '<span class="small muted">Guarde a foto da nota fiscal ou o comprovante (imagem ou PDF, até 5 MB; até 5 por lançamento).</span>'}`;
+            ${list.length ? '' : '<span class="small muted">Anexe foto da nota ou comprovante (imagem/PDF até 5 MB; máximo 5 por lançamento).</span>'}`;
         $$('[data-open]', box).forEach(b => b.onclick = () => openAttachmentViewer(list.find(a => String(a.id) === b.dataset.open)));
         $$('[data-del]', box).forEach(b => b.onclick = async () => {
             if (!await confirmDialog('Excluir este anexo?', {okLabel: 'Excluir'})) return;
@@ -325,7 +325,7 @@ async function saveAsTemplate(body) {
 
 function renderTemplatesPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Modelos favoritos')}
-        ${tip('templates', `Lançamentos que você repete. Ao criar um lançamento, toque num modelo para preencher tudo de uma vez. Para criar um, preencha um lançamento e use <strong>Salvar como modelo</strong>.`)}
+        ${tip('templates', `Use um modelo para preencher o lançamento. Para criar um, preencha os dados e use <strong>Salvar como modelo</strong>.`)}
         <div class="list">${state.templates.length ? state.templates.map(t => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('star')}</span>
             <span class="grow"><span class="title">${esc(t.name)}</span><span class="small muted">${t.type === 'INCOME' ? 'Receita' : 'Despesa'}${t.amount != null ? ' · ' + money(t.amount) : ''}${t.categoryName ? ' · ' + esc(t.categoryName) : ''}${t.accountName ? ' · ' + esc(t.accountName) : ''}</span></span>
             <button class="btn danger" data-del="${t.id}">Excluir</button></div>`).join('')
@@ -445,9 +445,9 @@ function openRemindersSheet() {
             <span class="avatar" style="background:var(--surface-2)">${ico(r.kind === 'BUDGET' ? 'target' : r.kind === 'MONTH_END' ? 'clock' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(r.title)}</span><span class="small muted">${esc(r.detail)}</span></span></div>`).join('')}</div>`
             : '<div class="card empty"><div class="big">' + ico('check') + '</div>Nada pedindo atenção agora.</div>'}
-        ${tip('reminders', `O app avisa de contas vencidas ou que vencem nos próximos ${state.settings.reminderDays} dias, de orçamentos a partir de 80% e do fim do mês. Ajuste em Mais → Configurações.`)}
+        ${tip('reminders', `Avisa sobre contas vencidas ou com vencimento nos próximos ${state.settings.reminderDays} dias, orçamentos acima de 80% e fim do mês. Veja Mais → Configurações.`)}
         ${canNotify && Notification.permission === 'default' ? '<button class="btn block" id="allow-notify">Ativar notificações do navegador</button>' : ''}
-        ${canNotify && Notification.permission === 'denied' ? '<p class="small muted">As notificações estão bloqueadas neste navegador. Libere nas configurações do site.</p>' : ''}
+        ${canNotify && Notification.permission === 'denied' ? '<p class="small muted">Notificações bloqueadas. Libere nas configurações do site.</p>' : ''}
         <div id="native-notify"></div>
         <div class="form-actions"><button type="button" class="btn" id="rem-close">Fechar</button></div>`);
     $('#rem-close', sheet).onclick = closeSheet;
@@ -469,7 +469,7 @@ async function paintNativeNotify(sheet) {
     $('#allow-native', box).onclick = async () => {
         try { status = await window.nativeNotifications.requestPermission(); } catch (e) { status = 'denied'; }
         if (status === 'granted') { toast('Notificações ativadas'); paintNativeNotify(sheet); }
-        else box.innerHTML = '<p class="small muted">As notificações estão bloqueadas para este app. Libere nas configurações do celular.</p>';
+        else box.innerHTML = '<p class="small muted">Notificações bloqueadas. Libere nas configurações do celular.</p>';
     };
 }
 

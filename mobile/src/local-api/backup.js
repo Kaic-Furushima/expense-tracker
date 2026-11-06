@@ -19,7 +19,7 @@ const FROM_H2 = {
     payment_methods: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     accounts: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', type: 'type', color: 'color', icon: 'icon', initial_cents: ['initial_balance', 'cents'],
-        archived: ['archived', 'bool'], parent_id: 'parent_id', closing_day: 'closing_day', due_day: 'due_day'
+        archived: ['archived', 'bool'], parent_id: 'parent_id', closing_day: 'closing_day', due_day: 'due_day', saved: ['saved', 'bool']
     },
     expenses: {
         id: 'id', uuid: 'uuid', name: 'name', description: 'description', amount_cents: ['amount', 'cents'], date: 'date', type: 'type',

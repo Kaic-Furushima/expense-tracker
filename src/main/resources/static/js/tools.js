@@ -116,7 +116,7 @@ function openInvoicePayment(account, list, index, invoice) {
             <input class="amount-input" id="p-amount" inputmode="decimal" autocomplete="off" value="${fmtInput(invoice.remaining)}" aria-label="Valor">
             <div class="field"><label for="p-from">Pagar com a conta</label><select id="p-from">${orderedAccounts(sources).map(a => `<option value="${a.id}" ${a.id === defaultFromAccount(sources) ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
             ${dateField('p-date', todayIso(), 'Data do pagamento')}
-            ${tip('invoice-pay', `O pagamento é uma transferência da conta para o cartão: não conta como despesa de novo (as compras já foram contadas). Pode pagar só uma parte.`)}
+            ${tip('invoice-pay', `Pagar a fatura transfere dinheiro da conta para o cartão, sem duplicar despesas. Você pode pagar parcialmente.`)}
             <div class="form-actions"><button type="button" class="btn" id="p-back">Voltar</button><button type="submit" class="btn primary">Pagar</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'p-date');
@@ -155,13 +155,13 @@ async function renderBackupPage() {
             <strong>Pasta dos backups</strong>
             <span class="small muted">${folder.configured
                 ? `Cada backup (inclusive o automático) também é gravado em <strong>${esc(folder.name)}</strong>, fora do aplicativo.`
-                : 'Hoje os backups ficam só dentro do aplicativo e somem se ele for desinstalado. Escolha uma pasta do celular para guardar uma cópia lá também.'}</span>
+                : 'Backups ficam no app e se perdem se ele for desinstalado. Escolha uma pasta do celular para guardar outra cópia.'}</span>
             ${folder.error ? `<span class="small" style="color:var(--warn)">Não foi possível gravar na pasta: ${esc(folder.error)}</span>` : ''}
             <div class="form-actions"><button type="button" class="btn" id="folder-pick">${folder.configured ? 'Trocar pasta…' : 'Escolher pasta…'}</button>
                 ${folder.configured ? '<button type="button" class="btn" id="folder-clear">Parar de usar</button>' : ''}</div>
         </div>`;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Backup e restauração')}
-        ${tip('backup', `Um backup é uma cópia de <strong>tudo</strong>: lançamentos, contas, categorias, orçamentos, metas e configurações. Fica guardado ${window.localApp ? 'dentro do aplicativo' : 'na pasta de dados do aplicativo'}; guarde também uma cópia ${window.localApp ? 'fora do celular' : 'fora do computador'} (nuvem ou pen drive).`)}
+        ${tip('backup', window.localApp ? 'Inclui lançamentos, contas, categorias, orçamentos, metas e configurações. Guarde outra cópia fora do celular.' : 'Inclui lançamentos, contas, categorias, orçamentos, metas e configurações. Guarde outra cópia fora do computador.')}
         <button class="btn primary block" id="make-backup">${ico('shield')} Fazer backup agora</button>
         ${folderBox}
         <h2 class="section-title">Backups guardados</h2>
@@ -172,7 +172,7 @@ async function renderBackupPage() {
                 <span class="muted">${ico('chevron-right')}</span></button>`;
         }).join('')}</div>` : '<div class="card empty">Nenhum backup ainda.</div>'}
         <button class="btn block" id="restore-file">${ico('upload')} Restaurar de um arquivo…</button>
-        <p class="small muted center">Restaurar substitui tudo o que está no aplicativo pelo conteúdo do backup. Antes disso, o aplicativo guarda uma cópia do que existe agora.</p>
+        <p class="small muted center">Restaurar substitui os dados atuais pelo backup; uma cópia dos dados atuais é salva antes.</p>
     </div>`;
     bindBack();
     $('#make-backup').onclick = async () => {
@@ -195,7 +195,7 @@ async function renderBackupPage() {
         };
         const clear = $('#folder-clear');
         if (clear) clear.onclick = async () => {
-            if (!await confirmDialog('Parar de gravar os backups na pasta? Os arquivos que já estão lá continuam lá.', {okLabel: 'Parar'})) return;
+            if (!await confirmDialog('Parar de salvar backups nesta pasta? Os arquivos existentes serão mantidos.', {okLabel: 'Parar'})) return;
             try { await api('/backups/folder', {method: 'DELETE'}); renderBackupPage(); } catch (e) { toast(e.message); }
         };
     }
@@ -223,8 +223,8 @@ function openRestoreSheet(source, label) {
         <div class="field" id="rs-new-box" hidden><label for="rs-new">Nome do perfil novo</label>
             <input id="rs-new" maxlength="40" autocomplete="off" placeholder="Ex.: Recuperado"></div>
         <div id="rs-over" class="stack-tight">
-            <p class="small" style="color:var(--warn);margin:0">Sobrescrever não tem volta. Tudo o que está no perfil escolhido será substituído pelo conteúdo do backup.</p>
-            ${syncOn ? '<p class="small" style="color:var(--warn);margin:0">Como o sync está ligado, a nuvem e os seus outros aparelhos também serão sobrescritos, à força: o que o backup não tiver será apagado lá.</p>' : ''}
+            <p class="small" style="color:var(--warn);margin:0">Não dá para desfazer: o perfil será substituído pelo backup.</p>
+            ${syncOn ? '<p class="small" style="color:var(--warn);margin:0">Com o sync ligado, o backup também substitui nuvem e outros aparelhos; itens ausentes nele serão apagados.</p>' : ''}
             <label class="switch-row"><input type="checkbox" id="rs-backup" checked>
                 <span><strong>Fazer um backup deste perfil antes de sobrescrever</strong>${info(`Fica guardado em Backup e restauração, para você poder voltar.`)}</span></label>
         </div>
@@ -318,29 +318,29 @@ async function copySyncScript() {
         let ok = false;
         try { ok = document.execCommand('copy'); } catch (err) { /* sem permissão */ }
         box.remove();
-        if (!ok) { toast('Não foi possível copiar. Abra /sync/supabase-hub.sql no navegador e copie o texto.'); return; }
+        if (!ok) { toast('Não foi possível copiar. Abra /sync/supabase-hub.sql e copie o texto.'); return; }
     }
     toast('Script copiado. Cole no SQL Editor do Supabase.');
 }
 
 function syncTutorial(central, open) {
     const own = `<ol class="small tutorial">
-        <li>Crie uma conta grátis em supabase.com e um projeto novo (guarde a senha do banco; não vamos usá-la).</li>
-        <li>No projeto, abra SQL Editor › New query, cole o script (o botão abaixo o copia) e clique em Run. Isso cria as tabelas, já protegidas por usuário.
+        <li>Crie uma conta grátis e um projeto no supabase.com.</li>
+        <li>No Supabase, abra SQL Editor › New query, cole o script e clique Run para criar tabelas protegidas por usuário.
             <div><button type="button" class="btn small" data-copy-sql>Copiar o script</button></div></li>
-        <li>Abra Authentication › Sign In / Providers › Email e desligue “Confirm email”. Se ficar ligado, a conta criada aqui não consegue entrar antes de confirmar o e-mail.</li>
-        <li>Abra Project Settings › API. Copie a Project URL e a chave anon public e cole nos campos acima.</li>
-        <li>Escolha um e-mail e uma senha para a sua conta, marque “Criar a conta agora” e defina a senha de sincronização.</li>
-        <li>No outro aparelho: mesma tela, mesma URL e chave, mesmo e-mail e senhas, mas sem marcar “Criar a conta agora”.</li>
-        <li>Pronto. Por segurança, depois de criar a sua conta, desligue em Authentication › Sign In / Providers a opção “Allow new users to sign up”, para ninguém mais criar conta no seu projeto.</li>
+        <li>Desative “Confirm email” em Authentication › Sign In / Providers › Email para liberar o primeiro acesso.</li>
+        <li>Em Project Settings › API, copie Project URL e anon public key para os campos acima.</li>
+        <li>Informe e-mail e senha, marque “Criar a conta agora” e defina a senha de sincronização.</li>
+        <li>No outro aparelho, use a mesma URL, chave, e-mail e senhas; não marque “Criar a conta agora”.</li>
+        <li>Após criar a conta, desative “Allow new users to sign up” em Authentication › Sign In / Providers para impedir novos cadastros.</li>
     </ol>
-    <p class="small muted">No plano grátis do Supabase, um projeto sem nenhuma atividade por cerca de 7 dias é pausado. Os dados ficam guardados e dá para reativar pelo botão “Restore” do painel; enquanto isso o sync mostra “sem conexão”. Usar o app normalmente já conta como atividade.</p>`;
+    <p class="small muted">No plano grátis, projetos sem atividade por cerca de 7 dias são pausados. Os dados permanecem; reative em “Restore”. Enquanto isso, o sync fica sem conexão.</p>`;
     const std = `<ol class="small tutorial">
-        <li>Neste primeiro aparelho, escolha Servidor padrão, digite um e-mail e uma senha para a conta e marque “Criar a conta agora”.</li>
-        <li>Defina a senha de sincronização (8 caracteres ou mais). Ela cifra os seus dados antes de saírem do aparelho e não pode ser recuperada: guarde-a em um lugar seguro.</li>
+        <li>No primeiro aparelho, escolha Servidor padrão, informe e-mail e senha e marque “Criar a conta agora”.</li>
+        <li>Defina uma senha de sincronização (8+ caracteres). Ela cifra os dados e não pode ser recuperada; guarde-a em segurança.</li>
         <li>Toque em Conectar e sincronizar.</li>
-        <li>No outro aparelho: abra a mesma tela, escolha Servidor padrão, use o mesmo e-mail e as mesmas senhas e não marque “Criar a conta agora”.</li>
-        <li>Pronto: a partir daí sincroniza ao abrir o app, depois de salvar algo e de tempos em tempos.</li>
+        <li>No outro aparelho, escolha Servidor padrão, use o mesmo e-mail e senhas e não marque “Criar a conta agora”.</li>
+        <li>Sincroniza ao abrir o app, após salvar e periodicamente.</li>
     </ol>`;
     return `<details class="card" ${open ? 'open' : ''}><summary><strong>Como configurar</strong></summary>
         ${central ? `<h3 class="small" style="margin:.8rem 0 .2rem">Com o servidor padrão</h3>${std}` : ''}
@@ -357,12 +357,12 @@ async function renderSyncPage() {
     if (!st.configured) {
         const central = !!st.central;
         $('#view').innerHTML = `<div class="stack">${head}
-            <p class="small muted">Mantém o computador e o celular com os mesmos dados. Tudo é cifrado antes de sair do aparelho com a sua senha de sincronização: o servidor guarda só texto ilegível. É opcional: sem conectar, o app funciona normalmente.</p>
+            <p class="small muted">Sincronize os dados entre computador e celular. Eles são cifrados antes do envio; o app funciona sem sync.</p>
             <form class="card stack-tight" id="sync-form" autocomplete="off">
                 ${central ? `<div class="chips" role="radiogroup" aria-label="Servidor">
                     <button type="button" class="chip active" data-mode="central" role="radio" aria-checked="true">Servidor padrão</button>
                     <button type="button" class="chip" data-mode="own" role="radio" aria-checked="false">Meu próprio projeto</button></div>
-                    <p class="small muted" id="sy-mode-help" style="margin:0">O mais simples: só e-mail e senha. Os dados ficam cifrados no servidor do aplicativo.</p>` : ''}
+                    <p class="small muted" id="sy-mode-help" style="margin:0">Servidor do app: entre com e-mail e senha; seus dados ficam cifrados.</p>` : ''}
                 <div id="sy-own" class="stack-tight" ${central ? 'hidden' : ''}>
                     <div class="field" style="margin:0"><label for="sy-url">Endereço do projeto Supabase</label>
                         <input id="sy-url" type="url" placeholder="https://xxxx.supabase.co" value="${esc(st.url || '')}"></div>
@@ -377,7 +377,7 @@ async function renderSyncPage() {
                     <span><strong>Criar a conta agora</strong>${info(`Marque só no primeiro aparelho; nos outros, entre com a mesma conta.`)}</span></label>
                 <div class="field" style="margin:0"><label for="sy-secret">Senha de sincronização</label>
                     <input id="sy-secret" type="password" required minlength="8">
-                    <span class="small muted">Cifra os seus dados. Use a mesma nos dois aparelhos. Se esquecer, os dados na nuvem não podem ser recuperados (os que estão nos aparelhos continuam).</span></div>
+                    <span class="small muted">Use a mesma senha de sincronização nos dois aparelhos. Sem ela, não é possível recuperar os dados da nuvem.</span></div>
                 <button class="btn primary block" type="submit">${ico('repeat')} Conectar e sincronizar</button>
             </form>
             ${syncTutorial(central, false)}
@@ -391,8 +391,8 @@ async function renderSyncPage() {
             $$('[data-mode]').forEach(x => { x.classList.toggle('active', x === b); x.setAttribute('aria-checked', String(x === b)); });
             $('#sy-own').hidden = mode !== 'own';
             $('#sy-mode-help').textContent = mode === 'own'
-                ? 'Os dados ficam no seu projeto Supabase, na sua conta. Veja “Como configurar” abaixo.'
-                : 'O mais simples: só e-mail e senha. Os dados ficam cifrados no servidor do aplicativo.';
+                ? 'Supabase: os dados ficam no seu projeto. Veja “Como configurar”.'
+                : 'Servidor do app: entre com e-mail e senha; seus dados ficam cifrados.';
             own();
         });
         $$('[data-copy-sql]').forEach(b => b.onclick = copySyncScript);
@@ -421,10 +421,10 @@ async function renderSyncPage() {
         </div>
         <div class="card stack-tight">
             <label class="switch-row"><input type="checkbox" id="sync-auto" ${st.autoSync ? 'checked' : ''}>
-                <span><strong>Sincronizar automaticamente</strong>${info(`Ao abrir, depois de salvar algo e de tempos em tempos. Sem internet, as alterações esperam e seguem quando voltar.`)}</span></label>
+                <span><strong>Sincronizar automaticamente</strong>${info(`Sincroniza ao abrir, salvar e periodicamente; offline, envia alterações quando a internet voltar.`)}</span></label>
         </div>
         <details class="card"><summary><strong>Conectar outro aparelho</strong></summary>
-            <p class="small">${st.mode === 'central' ? 'No outro aparelho, abra Mais › Sincronização, escolha Servidor padrão e use o mesmo e-mail e as mesmas senhas (a da conta e a de sincronização). Não marque “Criar a conta agora”.' : `No outro aparelho, abra Mais › Sincronização e use o mesmo projeto Supabase (${esc(st.url)}), o mesmo e-mail e as mesmas senhas (a da conta e a de sincronização). Não marque “Criar a conta agora”.`}</p>
+            <p class="small">${st.mode === 'central' ? 'No outro aparelho, abra Mais › Sincronização, escolha Servidor padrão e use a mesma conta e senhas. Não marque “Criar a conta agora”.' : `No outro aparelho, use o mesmo projeto Supabase (${esc(st.url)}), e-mail e senhas; não marque “Criar a conta agora”.`}</p>
         </details>
         <button class="btn block" id="sync-off">Desconectar este aparelho</button>
         <p class="small muted center">Desconectar não apaga nenhum dado, nem deste aparelho nem da nuvem.</p>
@@ -441,7 +441,7 @@ async function renderSyncPage() {
         try { state.sync = await api('/api/sync/auto', {method: 'PUT', body: {enabled: e.target.checked}}); } catch (err) { toast(err.message); }
     };
     $('#sync-off').onclick = async () => {
-        if (!await confirmDialog('Desconectar este aparelho do sync? Os dados continuam aqui e na nuvem.', {okLabel: 'Desconectar'})) return;
+        if (!await confirmDialog('Desconectar este aparelho do sync? Os dados permanecem aqui e na nuvem.', {okLabel: 'Desconectar'})) return;
         try { state.sync = await api('/api/sync', {method: 'DELETE'}); renderSyncPage(); } catch (err) { toast(err.message); }
     };
 }
@@ -455,13 +455,13 @@ function renderImportPage() {
     if (s.accountId == null || !accountById(s.accountId)) s.accountId = defaultAccountId();
     const accounts = activeAccounts();
     $('#view').innerHTML = `<div class="stack">${pageHeader('Importar lançamentos')}
-        ${tip('import', `Aceita o extrato do banco (<strong>OFX</strong>), uma planilha <strong>CSV</strong> com data, descrição e valor (banco ou cartão) e o CSV que este aplicativo exporta. Você confere tudo antes de salvar; nada é gravado até confirmar.`)}
+        ${tip('import', 'Aceita OFX ou CSV com data, descrição e valor. Confira antes de salvar; nada é gravado sem confirmação.')}
         <div class="card stack-tight">
             <div class="field" style="margin:0"><label for="imp-account">Conta que recebe os lançamentos</label>
                 <select id="imp-account">${accountOptions(s.accountId)}</select>
-                <span class="small muted">Vale para extratos e planilhas de banco. O CSV deste aplicativo já diz a conta de cada linha.</span></div>
+                <span class="small muted">Vale para extratos e planilhas de banco. O CSV do app já informa a conta de cada linha.</span></div>
             <label class="switch-row"><input type="checkbox" id="imp-invert" ${s.invert ? 'checked' : ''}>
-                <span><strong>Inverter entradas e saídas</strong>${info(`Use se o arquivo mostrar compras como números positivos e o app as tratar como receitas (ou o contrário).`)}</span></label>
+                <span><strong>Inverter entradas e saídas</strong>${info(`Use quando compras positivas forem tratadas como receitas (ou o contrário).`)}</span></label>
             <button class="btn primary block" id="imp-pick">${ico('upload')} Escolher arquivo…</button>
         </div>
         <div id="imp-review"></div>

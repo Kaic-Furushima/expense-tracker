@@ -34,7 +34,7 @@ public class SyncService {
 
     private static final Logger log = LoggerFactory.getLogger(SyncService.class);
     private static final long DEBOUNCE_SECONDS = 8;
-    private static final String OFFLINE = "Sem conexão com o servidor de sync. As alterações seguem quando a internet voltar.";
+    private static final String OFFLINE = "Sem conexão com o sync. As alterações serão enviadas quando a internet voltar.";
 
     /** What the sync screen shows; never carries a password or token. */
     public record Status(boolean available, boolean configured, boolean running, boolean central, String mode, String url,

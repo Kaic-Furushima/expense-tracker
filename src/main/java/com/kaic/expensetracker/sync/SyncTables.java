@@ -57,7 +57,7 @@ public final class SyncTables {
             table("payment_methods", List.of(text("name")), List.of("name"), null, false),
             table("accounts", List.of(text("name"), text("type"), text("color"), text("icon"),
                     cents("initial_cents", "initial_balance"), bool("archived"), fk("parent_id", "accounts"),
-                    integer("closing_day"), integer("due_day")), List.of("name"), null, false),
+                    integer("closing_day"), integer("due_day"), bool("saved")), List.of("name"), null, false),
             table("tags", List.of(text("name")), List.of("name"), null, false),
             table("expenses", List.of(text("name"), text("description"), cents("amount_cents", "amount"), date("date"),
                     text("type"), text("status"), fk("category_id", "categories"), fk("account_id", "accounts"),

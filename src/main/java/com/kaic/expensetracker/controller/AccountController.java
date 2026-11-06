@@ -91,23 +91,24 @@ public class AccountController {
             Long parentId,
             Boolean archived,
             Integer closingDay,
-            Integer dueDay) {
+            Integer dueDay,
+            Boolean saved) {
 
         AccountService.Draft toDraft() {
             return new AccountService.Draft(name, type, color, icon, initialBalance, parentId, Boolean.TRUE.equals(archived),
-                    closingDay, dueDay);
+                    closingDay, dueDay, saved);
         }
     }
 
     public record AccountResponse(Long id, String name, AccountType type, String color, String icon,
                                   BigDecimal initialBalance, boolean archived, Long parentId, String parentName,
-                                  BigDecimal balance, Integer closingDay, Integer dueDay) {
+                                  BigDecimal balance, Integer closingDay, Integer dueDay, boolean saved) {
         public static AccountResponse fromEntity(Account a, BigDecimal balance) {
             Account parent = a.getParent();
             return new AccountResponse(a.getId(), a.getName(), a.getType(), a.getColor(), a.getIcon(),
                     a.getInitialBalance(), a.isArchived(), parent == null ? null : parent.getId(),
                     parent == null ? null : parent.getName(), balance,
-                    a.getClosingDay(), a.getDueDay());
+                    a.getClosingDay(), a.getDueDay(), Boolean.TRUE.equals(a.getSaved()));
         }
     }
 }

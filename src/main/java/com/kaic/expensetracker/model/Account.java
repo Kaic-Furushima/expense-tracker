@@ -53,6 +53,10 @@ public class Account extends SyncEntity {
     @Column(name = "due_day")
     private Integer dueDay;
 
+    /** Money set aside (piggy bank, investment): it is shown apart from the available balance. Chosen by the person. */
+    @Column
+    private Boolean saved = false;
+
     /** Archived accounts keep their history but are not offered for new transactions. */
     @Column(nullable = false)
     private boolean archived;

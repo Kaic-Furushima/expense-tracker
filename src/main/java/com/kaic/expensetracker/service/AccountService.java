@@ -49,11 +49,16 @@ public class AccountService {
 
     /** Fields of an account, as typed by the user. */
     public record Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
-                        Long parentId, boolean archived, Integer closingDay, Integer dueDay) {
+                        Long parentId, boolean archived, Integer closingDay, Integer dueDay, Boolean saved) {
+
+        public Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
+                     Long parentId, boolean archived, Integer closingDay, Integer dueDay) {
+            this(name, type, color, icon, initialBalance, parentId, archived, closingDay, dueDay, null);
+        }
 
         public Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
                      Long parentId, boolean archived) {
-            this(name, type, color, icon, initialBalance, parentId, archived, null, null);
+            this(name, type, color, icon, initialBalance, parentId, archived, null, null, null);
         }
     }
 
@@ -210,6 +215,8 @@ public class AccountService {
         account.setInitialBalance(d.initialBalance() == null ? BigDecimal.ZERO : d.initialBalance());
         account.setParent(parent);
         account.setArchived(d.archived());
+        // not sent (an old client): keep what the account already was
+        if (d.saved() != null) account.setSaved(d.saved());
         boolean card = account.getType() == AccountType.CREDIT_CARD;
         account.setClosingDay(card ? requireDay(d.closingDay(), "fechamento") : null);
         account.setDueDay(card ? requireDay(d.dueDay(), "vencimento") : null);

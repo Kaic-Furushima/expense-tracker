@@ -32,12 +32,29 @@ const accountLabel = a => (a.parentName ? `${a.parentName} › ${a.name}` : a.na
 const byName = (a, b) => a.name.localeCompare(b.name, LOCALE);
 
 /** Accounts in display order: each top-level account followed by its parts ("cofrinhos"). */
+const accountSortMode = () => ['name', 'value', 'manual'].includes(safeStorage.get('accountSort')) ? safeStorage.get('accountSort') : 'name';
+/** The arranged order is kept per profile, because account ids belong to a profile. */
+const orderKey = () => `accountOrder:${state.profiles ? state.profiles.current : ''}`;
+const manualOrder = () => { try { const o = JSON.parse(safeStorage.get(orderKey()) || '[]'); return Array.isArray(o) ? o : []; } catch { return []; } };
+/** Comparator for the chosen order: by name, by balance (biggest first) or by the order the person arranged. */
+function accountComparator() {
+    const mode = accountSortMode();
+    if (mode === 'value') return (a, b) => Number(b.balance) - Number(a.balance) || byName(a, b);
+    if (mode === 'manual') {
+        const order = manualOrder();
+        const pos = a => { const i = order.indexOf(a.id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+        return (a, b) => pos(a) - pos(b) || byName(a, b);
+    }
+    return byName;
+}
+
 function orderedAccounts(list = state.accounts) {
-    const roots = list.filter(a => !a.parentId).sort(byName);
+    const cmp = accountComparator();
+    const roots = list.filter(a => !a.parentId).sort(cmp);
     const result = [];
     roots.forEach(r => {
         result.push(r);
-        list.filter(a => a.parentId === r.id).sort(byName).forEach(c => result.push(c));
+        list.filter(a => a.parentId === r.id).sort(cmp).forEach(c => result.push(c));
     });
     list.filter(a => a.parentId && !list.some(r => r.id === a.parentId)).forEach(a => result.push(a));
     return result;
@@ -123,16 +140,42 @@ function openCalendar(input) {
 /** Colours offered for categories, accounts and pots: a palette in place of the system colour picker, which differs
     between the browser and the desktop WebView. */
 const COLOR_CHOICES = ['#2F7D6D', '#5C6BC0', '#E07A3F', '#C2557A', '#6A9F3C', '#3D8FC4', '#9A6BB5', '#B08D2A',
-    '#E57373', '#64B5F6', '#FFB74D', '#81C784', '#4DB6AC', '#7986CB', '#A1887F', '#90A4AE'];
+    '#E57373', '#64B5F6', '#FFB74D', '#81C784', '#4DB6AC', '#7986CB', '#A1887F', '#90A4AE',
+    '#D32F2F', '#F06292', '#BA68C8', '#7E57C2', '#1976D2', '#00ACC1', '#00897B', '#388E3C',
+    '#AFB42B', '#FBC02D', '#F57C00', '#8D6E63', '#546E7A', '#37474F', '#212121', '#9E9E9E'];
 
-/** Paints the swatches into {@code container} and returns a function with the chosen colour. */
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+/** Accepts "abc", "#abc", "aabbcc" or "#aabbcc" and returns "#AABBCC", or '' when it is not a colour. */
+function normalizeHex(text) {
+    let h = String(text || '').trim().replace(/^#/, '');
+    if (/^[0-9a-f]{3}$/i.test(h)) h = h.split('').map(c => c + c).join('');
+    return HEX_RE.test('#' + h) ? '#' + h.toUpperCase() : '';
+}
+/** Black or white, whichever reads better on the colour (used for text over an account colour). */
+function readableOn(color) {
+    const h = normalizeHex(color);
+    if (!h) return '#fff';
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+        .map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? '#10231e' : '#fff';
+}
+
+/** Paints the swatches into {@code container} and returns a function with the chosen colour.
+    Besides the palette there is a free colour: a hex field plus the system picker. */
 function colorPicker(sheet, container, current) {
     let value = current;
     const choices = COLOR_CHOICES.includes(current) || !current ? COLOR_CHOICES : [current, ...COLOR_CHOICES];
     const paint = () => {
-        $(container, sheet).innerHTML = choices.map(c =>
-            `<button type="button" class="swatch ${c === value ? 'active' : ''}" data-color="${esc(c)}" style="background:${esc(c)}" aria-label="${esc(c)}" aria-pressed="${c === value}"></button>`).join('');
-        $$('.swatch', sheet).forEach(b => b.onclick = () => { value = b.dataset.color; paint(); });
+        const box = $(container, sheet);
+        const custom = normalizeHex(value) || '#2F7D6D';
+        box.innerHTML = choices.map(c =>
+            `<button type="button" class="swatch ${c === value ? 'active' : ''}" data-color="${esc(c)}" style="background:${esc(c)}" aria-label="${esc(c)}" aria-pressed="${c === value}"></button>`).join('')
+            + `<div class="color-custom"><input type="color" class="color-native" value="${esc(custom.toLowerCase())}" aria-label="Escolher cor livre">
+                <input class="color-hex" maxlength="7" placeholder="#RRGGBB" value="${esc(custom)}" aria-label="Código da cor" autocomplete="off"></div>`;
+        $$('.swatch', box).forEach(b => b.onclick = () => { value = b.dataset.color; paint(); });
+        const native = $('.color-native', box), hex = $('.color-hex', box);
+        native.oninput = () => { value = native.value.toUpperCase(); hex.value = value; $$('.swatch', box).forEach(s => s.classList.toggle('active', s.dataset.color === value)); };
+        hex.oninput = () => { const h = normalizeHex(hex.value); if (h) { value = h; native.value = h.toLowerCase(); $$('.swatch', box).forEach(s => s.classList.toggle('active', s.dataset.color === value)); } };
     };
     paint();
     return () => value;
@@ -174,8 +217,8 @@ function paintAccountButton() {
 
 function openAccountPicker() {
     const active = activeAccounts();
-    const available = active.filter(a => !a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
-    const saved = active.filter(a => a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const available = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
     const check = ico('check');
     const sheet = openSheet(`<h2>Ver lançamentos de</h2>
         <div class="list">
@@ -297,16 +340,16 @@ function securityCard() {
             ${warning}
             <p><strong>${s.passwordSet ? 'Com senha' : 'Sem senha'}</strong></p>
             <p class="small muted">${window.localApp
-                ? (s.passwordSet ? 'O app pede a senha ao abrir e depois de ficar um tempo em segundo plano. Vale para todos os perfis.'
+                ? (s.passwordSet ? 'O app pede a senha ao abrir e ao voltar do segundo plano; vale para todos os perfis.'
                     : 'Por padrão o app abre direto. Defina uma senha para pedi-la ao abrir.')
                 : (s.passwordSet
                     ? 'O app pede a senha ao abrir, no computador e no celular.'
-                    : 'Por padrão o app abre direto. Defina uma senha para pedi-la ao abrir, no computador e no celular.')}</p>
+                    : 'Por padrão, o app abre sem senha. Defina uma para exigi-la no computador e no celular.')}</p>
             <div class="chips">${buttons}</div>
             <p class="small muted">${window.localApp
-                ? 'A senha trava a abertura do app; ela não criptografa os dados guardados no aparelho. Se esquecer, use “Esqueci a senha” na tela de entrada: isso apaga todos os dados do aparelho, então mantenha um backup fora do app.'
+                ? 'A senha bloqueia a abertura, mas não criptografa os dados. Se esquecê-la, “Esqueci a senha” apaga tudo; mantenha backup externo.'
                 : `${s.localOnly === false ? 'Acesso pela rede local: ligado (run.bat celular).' : 'Acesso só neste computador. Para o celular, use run.bat celular.'}
-                Se esquecer a senha, apague o arquivo security.properties dentro da pasta de dados: o app volta a abrir sem senha.`}</p>
+                Esqueceu a senha? Apague security.properties na pasta de dados para voltar a abrir sem senha.`}</p>
         </div>`;
 }
 
@@ -318,11 +361,11 @@ function widgetsCard() {
     const locked = state.security && state.security.passwordSet;
     return `<h2 class="section-title">Widgets</h2>
         <div class="card stack-tight">
-            <p class="small muted">Para adicionar: segure um espaço vazio da tela inicial, toque em Widgets e escolha o Expense Tracker. Há o de saldo (total ou de uma conta) e o de orçamento ou caixinha, cada um com ou sem o botão “+” para lançar.</p>
+            <p class="small muted">Para adicionar um widget, segure a tela inicial, toque em Widgets e escolha Expense Tracker. Há widgets de saldo, orçamento e caixinha.</p>
             <label class="switch-row"><input type="checkbox" id="widgets-pw" ${w.withPassword() ? 'checked' : ''}>
                 <span><strong>Mostrar os widgets mesmo com senha</strong>
-                ${info('Desligado: com senha no app, os widgets só mostram “Aplicativo bloqueado por senha. Widgets desativados.”. Ligado: eles mostram os valores sem pedir a senha, e ela é pedida ao tocar no “+” ou no widget para abrir o app.')}</span></label>
-            ${locked ? '' : '<p class="small muted">Você não tem senha no app, então os widgets já funcionam. Esta opção só vale se você definir uma senha.</p>'}
+                ${info('Desligado: widgets ocultos quando há senha. Ligado: mostra saldos sem senha; abrir pelo widget pede a senha.')}</span></label>
+            ${locked ? '' : '<p class="small muted">Widgets já funcionam sem senha; esta opção só vale se você definir uma.</p>'}
         </div>`;
 }
 
@@ -377,7 +420,7 @@ async function loadAbout() {
         if (info.startupAvailable) {
             box.insertAdjacentHTML('beforeend', `<label class="switch-row"><input type="checkbox" id="startup" ${info.startupEnabled ? 'checked' : ''}>
                 <span><strong>Iniciar com o Windows</strong>
-                <span class="small muted" style="display:block">Abre o Expense Tracker junto com o computador, direto na bandeja. Vale só para este usuário.</span></span></label>`);
+                <span class="small muted" style="display:block">Abre o Expense Tracker com o Windows, direto na bandeja (só para este usuário).</span></span></label>`);
             $('#startup', box).onchange = async e => {
                 try {
                     await api('/api/about/startup', {method: 'PUT', body: {enabled: e.target.checked}});
@@ -410,7 +453,7 @@ function renderMoreMenu() {
         <div class="card stack-tight">
             <label class="switch-row"><input type="checkbox" id="auto-pay" ${state.settings.autoPayRecurring ? 'checked' : ''}>
                 <span><strong>Descontar pagamentos recorrentes automaticamente</strong>
-                ${info(`Ligado: no dia do vencimento o lançamento é criado sozinho. Desligado: eles ficam em “A pagar” até você confirmar. Pagamentos de valor variável sempre pedem confirmação.`)}</span></label>
+                ${info(`Ligado: lança automaticamente no vencimento. Desligado: exige confirmação; valores variáveis sempre exigem.`)}</span></label>
             <label class="switch-row"><input type="checkbox" id="rollover" ${state.settings.budgetRollover ? 'checked' : ''}>
                 <span><strong>Levar a sobra do orçamento para o mês seguinte</strong>
                 ${info(`O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}`)}</span></label>
@@ -423,17 +466,17 @@ function renderMoreMenu() {
             <label class="switch-row"><input type="checkbox" id="reminders" ${state.settings.remindersEnabled ? 'checked' : ''}>
                 <span><strong>Lembretes</strong>
                 ${info(`${window.nativeNotifications
-                    ? 'Avisa (no sino do topo e em notificações do celular) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. As contas e o fim do mês também avisam às 9h, mesmo com o app fechado.'
-                    : `Avisa (no sino do topo${window.desktop ? ' e em notificações do Windows' : ' e, se você permitir, em notificações do navegador'}) de contas vencidas ou perto de vencer, orçamentos a partir de 80% e do fim do mês. Só funciona com o app aberto.`}`)}</span></label>
+                    ? 'Avisa sobre contas vencidas ou próximas, orçamentos acima de 80% e fim do mês. Contas e fim do mês também notificam às 9h, mesmo com o app fechado.'
+                    : `Avisa no sino do topo${window.desktop ? ' e em notificações do Windows' : ' e, se você permitir, em notificações do navegador'} sobre contas vencidas ou próximas, orçamentos acima de 80% e fim do mês. Só funciona com o app aberto.`}`)}</span></label>
             <div class="field" style="margin:0"><label for="reminder-days">Avisar contas com antecedência de</label>
                 <select id="reminder-days" ${state.settings.remindersEnabled ? '' : 'disabled'}>${[1, 2, 3, 5, 7, 10, 15].map(n =>
                     `<option value="${n}" ${state.settings.reminderDays === n ? 'selected' : ''}>${n === 1 ? '1 dia' : n + ' dias'}</option>`).join('')}</select></div>
             <label class="switch-row"><input type="checkbox" id="auto-backup" ${state.settings.autoBackup ? 'checked' : ''}>
                 <span><strong>Backup automático todo dia</strong>
-                ${info(`Guarda uma cópia de tudo na pasta de dados, no máximo uma por dia, enquanto o app estiver aberto. Ficam as 7 mais recentes, em Backup e restauração.`)}</span></label>
-            ${state.settings.autoBackup ? '' : tip('no-backup', 'Sem backup automático, um erro ou um arquivo apagado por engano pode levar seus dados sem volta.')}
+                ${info(`Faz até um backup por dia enquanto o app está aberto e mantém os sete mais recentes.`)}</span></label>
+            ${state.settings.autoBackup ? '' : tip('no-backup', 'Sem backup automático, você pode perder seus dados.')}
             <label class="switch-row"><input type="checkbox" id="tips" ${tipsOn() ? 'checked' : ''}>
-                <span><strong>Mostrar dicas</strong>${info('Explicações curtas pelas telas. Cada dica aparece uma vez, com o botão “Entendi” para não voltar. Vale só neste aparelho.')}</span></label>
+                <span><strong>Mostrar dicas</strong>${info('Dicas rápidas aparecem uma vez. Toque em “Entendi” para ocultá-las neste aparelho.')}</span></label>
         </div>
         ${securityCard()}
         ${widgetsCard()}
@@ -509,7 +552,7 @@ function renderMoreMenu() {
     const widgetsPw = $('#widgets-pw');
     if (widgetsPw) widgetsPw.onchange = async () => {
         if (widgetsPw.checked && state.security && state.security.passwordSet
-            && !await confirmDialog('Com isso, os saldos aparecem na tela inicial sem pedir a senha do app. Quem pegar o celular desbloqueado poderá vê-los. Ligar mesmo assim?', {okLabel: 'Ligar'})) {
+            && !await confirmDialog('Ativar widgets com saldos? Quem acessar o celular desbloqueado poderá vê-los sem senha.', {okLabel: 'Ligar'})) {
             widgetsPw.checked = false;
             return;
         }
@@ -529,11 +572,11 @@ function renderMoreMenu() {
         }
     };
     $('#demo').onclick = async () => {
-        if (!await confirmDialog('Adicionar dados de exemplo? São 6 meses de lançamentos em várias contas e cartão, parcelados, orçamentos, pagamentos recorrentes, caixinhas, desejos e modelos. Para apagar tudo depois, use “Limpar tudo”.', {okLabel: 'Adicionar', danger: false})) return;
+        if (!await confirmDialog('Adicionar dados de exemplo?', {okLabel: 'Adicionar', danger: false})) return;
         await run(() => api('/api/demo-data', {method: 'POST'}), 'Dados de exemplo carregados');
     };
     $('#wipe').onclick = async () => {
-        if (!await confirmDialog('Mover TUDO para a lixeira? Lançamentos, transferências, contas, categorias, orçamentos, pagamentos recorrentes, caixinhas, desejos e modelos saem do app, que volta ao estado de recém-instalado. Uma cópia completa fica em Mais → Lixeira por 30 dias, e dá para restaurar tudo de uma vez.', {okLabel: 'Limpar tudo'})) return;
+        if (!await confirmDialog('Mover TUDO para a lixeira?', {okLabel: 'Limpar tudo'})) return;
         await run(() => api('/api/data', {method: 'DELETE'}), 'Tudo foi para a lixeira');
     };
 }
@@ -544,7 +587,7 @@ function renderCategoriesPage() {
     const list = orderedCategories(kind);
     $('#view').innerHTML = `<div class="stack">${pageHeader('Categorias')}
         <div class="seg"><button type="button" data-kind="EXPENSE" class="exp ${kind === 'EXPENSE' ? 'active' : ''}">Despesas</button><button type="button" data-kind="INCOME" class="inc ${kind === 'INCOME' ? 'active' : ''}">Receitas</button></div>
-        ${tip('categories', 'Despesas e receitas têm categorias separadas: uma criada para um não aparece no outro, mas dá para copiar. Uma categoria pode ter subcategorias (por exemplo, Alimentação › Restaurante); os totais e o orçamento da principal somam as subcategorias.')}
+        ${tip('categories', 'Despesas e receitas têm categorias separadas. Os totais e orçamentos da categoria principal incluem as subcategorias.')}
         <div class="list">${list.map(c => `<button class="row ${c.parentId ? 'sub-row' : ''}" data-cat="${c.id}">
             ${avatar(c.icon, c.color)}<span class="grow title">${esc(c.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-cat"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">${kind === 'INCOME' ? 'Nova categoria de receita' : 'Nova categoria de despesa'}</span></button></div>
@@ -563,21 +606,56 @@ function renderCategoriesPage() {
 function renderAccountsPage() {
     const active = activeAccounts();
     const archived = state.accounts.filter(a => a.archived);
-    const available = active.filter(a => !a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
-    const saved = active.filter(a => a.parentId).reduce((sum, a) => sum + Number(a.balance), 0);
+    const available = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
     const cardInfo = a => a.type === 'CREDIT_CARD' ? (a.closingDay && a.dueDay ? ` · fecha dia ${a.closingDay}, vence dia ${a.dueDay} · ver faturas` : ' · defina o fechamento') : '';
     const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}">${avatar(a.icon || 'bank', a.color)}
-        <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a) + cardInfo(a), a.parentName ? 'dentro de ' + esc(a.parentName) : '', a.archived ? 'arquivada' : ''].filter(Boolean).join(' · ') || '&nbsp;'}</span></span>
+        <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a) + cardInfo(a), a.saved ? 'guardado' : '', a.parentName ? 'dentro de ' + esc(a.parentName) : '', a.archived ? 'arquivada' : ''].filter(Boolean).join(' · ') || '&nbsp;'}</span></span>
         <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance)}</span></button>`;
+    const mode = accountSortMode();
+    // in manual mode every active account gets arrows to move it among its siblings
+    const manualRow = (a, list) => {
+        const sibs = list.filter(x => x.parentId === a.parentId);
+        const i = sibs.findIndex(x => x.id === a.id);
+        return `<div class="manual-row" style="display:flex;align-items:stretch;gap:6px">
+            <div style="flex:1;min-width:0;display:flex">${row(a).replace('<button class="row', '<button style="flex:1" class="row')}</div>
+            <div class="move-btns"><button type="button" class="icon-btn small" data-move="-1" data-id="${a.id}" aria-label="Subir" ${i <= 0 ? 'disabled' : ''}>${ico('arrow-up')}</button>
+            <button type="button" class="icon-btn small" data-move="1" data-id="${a.id}" aria-label="Descer" ${i >= sibs.length - 1 ? 'disabled' : ''}>${ico('arrow-down')}</button></div></div>`;
+    };
+    const ordered = orderedAccounts(active);
     $('#view').innerHTML = `<div class="stack">${pageHeader('Contas')}
+        <div class="account-sort"><span class="small muted">Ordenar:</span>
+            ${[['name', 'Nome'], ['value', 'Valor'], ['manual', 'Manual']].map(([k, l]) => `<button type="button" data-sort="${k}" class="${k === mode ? 'active' : ''}">${l}</button>`).join('')}</div>
         <div class="card">
             <div class="small muted">Disponível nas contas</div><div style="font-size:1.5rem;font-weight:800">${money(available)}</div>
             ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
-            ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só o que está pago conta.`)}</div>
-        <div class="list">${orderedAccounts(active).map(row).join('')}
+            ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só pagamentos feitos entram.`)}</div>
+        <div class="list">${ordered.map(a => mode === 'manual' ? manualRow(a, ordered) : row(a)).join('')}
             <button class="row" id="new-account"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button></div>
         ${archived.length ? `<h2 class="section-title">Arquivadas</h2><div class="list">${orderedAccounts(archived).map(row).join('')}</div>` : ''}</div>`;
     bindBack();
+    $$('[data-sort]').forEach(b => b.onclick = () => {
+        safeStorage.set('accountSort', b.dataset.sort);
+        // starting the manual order from what is on screen, so nothing jumps
+        if (b.dataset.sort === 'manual' && !manualOrder().length) safeStorage.set(orderKey(), JSON.stringify(ordered.map(a => a.id)));
+        renderAccountsPage();
+    });
+    $$('[data-move]').forEach(b => b.onclick = e => {
+        e.stopPropagation();
+        const id = Number(b.dataset.id), dir = Number(b.dataset.move);
+        const ids = ordered.map(a => a.id);
+        const me = ordered.find(a => a.id === id);
+        const sibs = ordered.filter(a => a.parentId === me.parentId).map(a => a.id);
+        const i = sibs.indexOf(id), j = i + dir;
+        if (j < 0 || j >= sibs.length) return;
+        [sibs[i], sibs[j]] = [sibs[j], sibs[i]];
+        // position of each sibling in the saved order follows the swapped list
+        const slots = ids.map((x, k) => ordered[k].parentId === me.parentId ? k : -1).filter(k => k >= 0);
+        const next = ids.slice();
+        slots.forEach((slot, k) => { next[slot] = sibs[k]; });
+        safeStorage.set(orderKey(), JSON.stringify(next));
+        renderAccountsPage();
+    });
     $$('[data-account]').forEach(b => b.onclick = () => {
         const account = accountById(Number(b.dataset.account));
         if (account.type === 'CREDIT_CARD' && account.closingDay && account.dueDay && !account.archived) openInvoices(account);
@@ -600,11 +678,13 @@ function openAccountSheet(account) {
                 <div class="field"><label for="a-closing">Dia de fechamento</label><input id="a-closing" inputmode="numeric" maxlength="2" placeholder="Ex.: 10" value="${esc(account?.closingDay ?? '')}"></div>
                 <div class="field"><label for="a-due">Dia de vencimento</label><input id="a-due" inputmode="numeric" maxlength="2" placeholder="Ex.: 20" value="${esc(account?.dueDay ?? '')}"></div>
             </div>
-            <p class="small muted" id="a-card-hint" hidden style="margin-top:-6px">As compras feitas até o dia de fechamento entram na fatura daquele mês; as de depois, na do mês seguinte. O saldo do cartão fica negativo (é o que você deve) e volta a zero quando você paga a fatura.</p>
+            <p class="small muted" id="a-card-hint" hidden style="margin-top:-6px">Compras até o fechamento entram na fatura do mês; depois, na próxima. O saldo negativo é o valor devido e zera ao pagar a fatura.</p>
             <div class="field"><label for="a-parent">Fica dentro de</label>
                 <select id="a-parent" ${hasParts ? 'disabled' : ''}>${options(tops, account?.parentId, {none: 'Nenhuma (conta própria)'})}</select>
                 <span class="small muted">${hasParts ? 'Esta conta tem partes dentro dela, então não pode ficar dentro de outra.'
-                    : 'Para investimentos que ficam dentro de um banco (ex.: a caixinha do Nubank). O saldo dela fica separado do saldo disponível da conta; para guardar dinheiro, faça uma transferência.'}</span></div>
+                    : 'Para contas dentro de um banco (ex.: caixinha do Nubank). Para guardar dinheiro, transfira para ela.'}</span></div>
+            <label class="switch-row"><input type="checkbox" id="a-saved" ${account?.saved ? 'checked' : ''}>
+                <span>Dinheiro guardado${info('O saldo aparece separado, pequeno embaixo do saldo total.')}</span></label>
             <div class="field"><label for="a-balance">Saldo inicial (${esc(currencySymbol())})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
                 <span class="small muted">Quanto havia na conta antes de começar a lançar aqui. Pode ser negativo.</span></div>
             ${account && account.type !== 'CREDIT_CARD' ? `<button type="button" class="btn block" id="a-adjust">${ico('pencil')} Corrigir saldo…</button>
@@ -629,7 +709,7 @@ function openAccountSheet(account) {
         const adjust = $('#a-adjust', sheet);
         if (adjust) adjust.onclick = () => openBalanceAdjust(account);
         $('#a-del', sheet).onclick = async () => {
-            if (await confirmDialog(`Excluir a conta “${account.name}”? Contas com lançamentos não podem ser excluídas — arquive-as.`, {okLabel: 'Excluir'}))
+            if (await confirmDialog(`Excluir a conta “${account.name}”? Contas com lançamentos só podem ser arquivadas.`, {okLabel: 'Excluir'}))
                 run(() => api(`/accounts/${account.id}`, {method: 'DELETE'}), 'Conta excluída');
         };
     }
@@ -649,7 +729,7 @@ function openAccountSheet(account) {
         }
         const body = {name, type, color: colorOf(), icon: icon(), initialBalance,
             parentId: hasParts ? null : nextId($('#a-parent', sheet).value),
-            archived: account ? $('#a-archived', sheet).checked : false,
+            archived: account ? $('#a-archived', sheet).checked : false, saved: $('#a-saved', sheet).checked,
             closingDay: type === 'CREDIT_CARD' ? closingDay : null, dueDay: type === 'CREDIT_CARD' ? dueDay : null};
         run(() => api(account ? `/accounts/${account.id}` : '/accounts', {method: account ? 'PUT' : 'POST', body}), 'Conta salva');
     };
@@ -665,7 +745,7 @@ function openBalanceAdjust(account) {
             <div class="field"><label for="adj-balance">Saldo atual de verdade (${esc(currencySymbol())})</label>
                 <input class="amount-input" id="adj-balance" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(account.balance)}"></div>
             <p class="small center" id="adj-diff" aria-live="polite"></p>
-            ${tip('adjust-balance', 'O app guarda a diferença como uma “Correção de saldo” (aparece na lista de lançamentos e no resumo do mês, à parte das receitas e despesas). Se errar, é só excluir esse lançamento.')}
+            ${tip('adjust-balance', 'O app registra a diferença como “Correção de saldo”. Se errar, exclua esse lançamento.')}
             <div class="form-actions"><button type="button" class="btn" id="adj-cancel">Voltar</button><button type="submit" class="btn primary">Corrigir</button></div>
         </form>`);
     const field = $('#adj-balance', sheet), diffBox = $('#adj-diff', sheet);
@@ -693,7 +773,7 @@ function openBalanceAdjust(account) {
 /* ---------- Payment methods ---------- */
 function renderMethodsPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Formas de pagamento')}
-        ${tip('methods', `Como o pagamento foi feito (Pix, débito, crédito…). É independente da conta de onde o dinheiro saiu.`)}
+        ${tip('methods', `Forma de pagamento indica como pagou (Pix, débito, crédito), independentemente da conta usada.`)}
         <div class="list">${state.methods.map(m => `<button class="row" data-method="${m.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico('credit-card')}</span><span class="grow title">${esc(m.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-method"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova forma de pagamento</span></button></div></div>`;
@@ -895,7 +975,7 @@ function openPotSheet(pot) {
             <div class="field"><label>Como ela cresce?</label>
                 <div class="seg" id="p-mode"><button type="button" data-mode="FIXED">Valor fixo por mês</button><button type="button" data-mode="VARIABLE">Eu aporto quando quiser</button></div></div>
             <div class="field" id="p-monthly-field"><label for="p-monthly">Aporte mensal (${currencySymbol()})</label><input id="p-monthly" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.monthlyAmount)}">
-                <span class="small muted">Entra sozinho no dia 1 de cada mês, a partir do mês de início. É uma reserva: o dinheiro continua na sua conta.</span></div>
+                <span class="small muted">Aporte automático no dia 1, a partir do mês inicial. O dinheiro continua na conta.</span></div>
             <div class="field"><label for="p-account">Banco / conta</label>
                 <select id="p-account"><option value="">Nenhum (sem vínculo)</option>${orderedAccounts(state.accounts.filter(a => a.type !== 'CREDIT_CARD' && (!a.archived || a.id === pot?.accountId))).map(a =>
                     `<option value="${a.id}" ${a.id === pot?.accountId ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select>
@@ -921,7 +1001,7 @@ function openPotSheet(pot) {
     paintMode();
     if (pot) {
         $('#p-del', sheet).onclick = async () => {
-            if (await confirmDialog(`Excluir a caixinha “${pot.name}” e todo o histórico dela? Os desejos ligados a ela ficam sem caixinha.`, {okLabel: 'Excluir'}))
+            if (await confirmDialog(`Excluir a caixinha “${pot.name}” e seu histórico? Desejos vinculados ficarão sem caixinha.`, {okLabel: 'Excluir'}))
                 run(() => api(`/pots/${pot.id}`, {method: 'DELETE'}), 'Caixinha excluída');
         };
     }
@@ -1002,7 +1082,7 @@ function openWishSheet(item) {
             </div>
             <div class="field"><label for="w-url">Link</label><input id="w-url" maxlength="500" placeholder="Opcional" value="${esc(item?.url)}"></div>
             <div class="field"><label for="w-notes">Observação</label><textarea id="w-notes" rows="2" maxlength="255">${esc(item?.notes)}</textarea></div>
-            ${tip('wish-account', `Enquanto está na lista, o item não pertence a nenhuma conta. A conta é escolhida quando você marcar “Comprei”.`)}
+            ${tip('wish-account', `Na lista, o item não pertence a uma conta. Você escolhe a conta ao marcar “Comprei”.`)}
             <div class="form-actions">
                 ${item ? '<button type="button" class="btn danger" id="w-del">Excluir</button>' : ''}
                 ${item && item.status === 'WISHED' ? '<button type="button" class="btn" id="w-discard">Descartar</button>' : ''}
@@ -1106,7 +1186,7 @@ async function renderTrashPage() {
     }
     if (state.tab !== 'more' || state.sub !== 'trash') return; // navigated away while loading
     $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}
-        ${tip('trash', `O que você exclui vem para cá e fica guardado por 30 dias; depois é apagado de vez. Restaurar traz o item de volta com a mesma data e conta.`)}
+        ${tip('trash', `Itens excluídos ficam na lixeira por 30 dias. Restaurar mantém a data e a conta.`)}
         ${items.length ? `<div class="list">${items.map(i => i.kind === 'EVERYTHING' ? `<div class="row" data-trash="${i.kind}:${i.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
             <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${i.detail.split(' · ').map(part => `<span>${esc(part)}</span>`).join(' · ')}</span><span class="small muted">Limpo em ${dateTimeBr(i.deletedAt)}</span></span>
@@ -1124,7 +1204,7 @@ async function renderTrashPage() {
     const refresh = async message => { await loadAll(); toast(message); };
     $$('[data-restore]').forEach(b => b.onclick = async () => {
         const [kind, id] = b.dataset.restore.split(':');
-        if (kind === 'EVERYTHING' && !await confirmDialog('Voltar todos os dados para como estavam nesta cópia? Tudo o que está no app agora é substituído (e também vai para a lixeira, para você poder desfazer).', {okLabel: 'Restaurar tudo', danger: false})) return;
+        if (kind === 'EVERYTHING' && !await confirmDialog('Restaurar esta cópia? Os dados atuais serão substituídos e enviados para a lixeira.', {okLabel: 'Restaurar tudo', danger: false})) return;
         try { await api(`/trash/${kind}/${id}/restore`, {method: 'POST'}); await refresh('Restaurado'); } catch (e) { toast(e.message); }
     });
     $$('[data-purge]').forEach(b => b.onclick = async () => {

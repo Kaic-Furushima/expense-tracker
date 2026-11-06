@@ -184,7 +184,7 @@ export class Catalog {
             id: row.id, name: row.name, type: row.type, color: row.color, icon: row.icon,
             initialBalance: fromCents(row.initial_cents), archived: !!row.archived,
             parentId: row.parent_id, parentName: parentName ?? null,
-            balance: fromCents(balanceCents), closingDay: row.closing_day, dueDay: row.due_day
+            balance: fromCents(balanceCents), closingDay: row.closing_day, dueDay: row.due_day, saved: !!row.saved
         };
     }
 
@@ -228,10 +228,10 @@ export class Catalog {
     createAccount(body) {
         const fields = this.accountFields(body, null);
         if (this.db.get('select 1 from accounts where name = ?', [fields.name])) throw conflict('Já existe uma conta com esse nome.');
-        const {lastId} = this.db.run(`insert into accounts (uuid, name, type, color, icon, initial_cents, archived, parent_id, closing_day, due_day, updated_at)
-                                      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        const {lastId} = this.db.run(`insert into accounts (uuid, name, type, color, icon, initial_cents, archived, parent_id, closing_day, due_day, saved, updated_at)
+                                      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [this.db.newId(), fields.name, fields.type, fields.color, fields.icon, fields.initialCents, fields.archived ? 1 : 0,
-                fields.parentId, fields.closingDay, fields.dueDay, this.db.now()]);
+                fields.parentId, fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, this.db.now()]);
         return this.accountWithBalance(lastId);
     }
 
@@ -246,9 +246,9 @@ export class Catalog {
             if (current.parent_id == null && this.activeTopLevelCount() <= 1) throw conflict('Mantenha pelo menos uma conta ativa.');
         }
         this.db.run(`update accounts set name = ?, type = ?, color = ?, icon = ?, initial_cents = ?, archived = ?, parent_id = ?,
-                     closing_day = ?, due_day = ?, updated_at = ? where id = ?`,
+                     closing_day = ?, due_day = ?, saved = ?, updated_at = ? where id = ?`,
             [fields.name, fields.type, fields.color, fields.icon, fields.initialCents, fields.archived ? 1 : 0, fields.parentId,
-                fields.closingDay, fields.dueDay, this.db.now(), id]);
+                fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, this.db.now(), id]);
         return this.accountWithBalance(id);
     }
 
@@ -311,6 +311,8 @@ export class Catalog {
             icon: body.icon && String(body.icon).trim() ? String(body.icon).trim() : null,
             initialCents: toCents(initial),
             archived: body.archived === true,
+            // nao enviado (cliente antigo): a conta continua como estava
+            saved: body.saved === undefined || body.saved === null ? !!current?.saved : body.saved === true,
             parentId: this.resolveParent('accounts', 'Conta', current, body.parentId,
                 'Uma conta não pode ficar dentro dela mesma.', 'Só é possível ficar dentro de uma conta principal (um nível).',
                 'Esta conta já tem partes; não pode ficar dentro de outra.'),

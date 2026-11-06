@@ -77,4 +77,20 @@ class AccountServiceTest {
         accountService.delete(account.getId());
         assertTrue(accountService.findAll().stream().noneMatch(a -> a.getId().equals(account.getId())));
     }
+
+    @Test
+    void savedMoneyIsAChoiceOfTheAccountAndSurvivesEditsThatDoNotSendIt() {
+        Account plain = accountService.create(new AccountService.Draft("Conta de teste comum", AccountType.CHECKING, null, null, null, null, false));
+        assertFalse(Boolean.TRUE.equals(plain.getSaved()));
+
+        Account saved = accountService.create(new AccountService.Draft("Conta de teste guardada", AccountType.SAVINGS, null, null, null, null, false, null, null, true));
+        assertTrue(saved.getSaved());
+
+        // an old client edits without sending the field: it stays as it was
+        Account renamed = accountService.update(saved.getId(), new AccountService.Draft("Conta de teste guardada 2", AccountType.SAVINGS, null, null, null, null, false));
+        assertTrue(renamed.getSaved());
+
+        Account cleared = accountService.update(saved.getId(), new AccountService.Draft(renamed.getName(), AccountType.SAVINGS, null, null, null, null, false, null, null, false));
+        assertFalse(cleared.getSaved());
+    }
 }

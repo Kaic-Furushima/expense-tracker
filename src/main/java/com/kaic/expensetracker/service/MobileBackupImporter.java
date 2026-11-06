@@ -59,7 +59,7 @@ final class MobileBackupImporter {
             table("categories", ID, UUID_COL, UPDATED, text("name"), text("icon"), text("color"), num("parent_id"), text("kind")),
             table("payment_methods", ID, UUID_COL, UPDATED, text("name")),
             table("accounts", ID, UUID_COL, UPDATED, text("name"), text("type"), text("color"), text("icon"),
-                    cents("initial_cents", "initial_balance"), flag("archived"), num("parent_id"), num("closing_day"), num("due_day")),
+                    cents("initial_cents", "initial_balance"), flag("archived"), num("parent_id"), num("closing_day"), num("due_day"), flag("saved")),
             table("expenses", ID, UUID_COL, text("name"), text("description"), cents("amount_cents", "amount"), date("date"), text("type"),
                     text("status"), num("category_id"), num("account_id"), num("payment_method_id"), text("installment_group"),
                     num("installment_number"), num("installment_total"), ts("created_at"), UPDATED, ts("deleted_at"), flag("adjustment")),
