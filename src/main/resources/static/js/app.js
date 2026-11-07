@@ -416,6 +416,7 @@ async function loadAll({keepScroll = true} = {}) {
     try {
         // Occurrences first: loading them creates (and, when enabled, pays) what is due, which the lists below must show.
         state.occurrences = await api(`/recurring/occurrences?month=${state.month}`);
+        state.rules = await api('/recurring');
         const accountParam = state.accountFilter ? `&accountId=${state.accountFilter}` : state.currencyFilter ? `&currency=${state.currencyFilter}` : '';
         const [categories, accounts, methods, settings, pots, wishes, tags, pending, summary, transactions, transfers, attachCounts, templates, profiles, syncStatus] = await Promise.all([
             api('/categories'),
@@ -511,21 +512,54 @@ function avatar(icon, color, extra = '') {
     return `<span class="avatar" style="background:${esc(color || '#9E9E9E')}33;${extra}">${ico(icon || 'package')}</span>`;
 }
 
+/**
+ * What the recurring payments still have to pay or receive in the month on screen: the pending occurrences that exist and,
+ * from the current month on, the ones the rules will create (they do not exist yet, so they cannot be paid). Each one has a
+ * `key` to find it again (the id, or "p" and the rule's id when it is only a projection).
+ */
+function recurringDue() {
+    const inScope = id => (state.accountFilter ? id === state.accountFilter : state.currencyFilter ? currencyOfAccount(id) === state.currencyFilter : true);
+    const items = state.occurrences.filter(o => o.status === 'PENDING' && inScope(o.accountId)).map(o => ({...o, key: String(o.id)}));
+    if (state.month >= todayIso().slice(0, 7)) {
+        const [y, m] = state.month.split('-').map(Number);
+        const have = new Set(state.occurrences.map(o => o.recurringId));
+        (state.rules || []).filter(r => r.active && !have.has(r.id) && r.startMonth <= state.month && (!r.endMonth || r.endMonth >= state.month) && inScope(r.accountId))
+            .forEach(r => items.push({
+                id: null, projected: true, key: 'p' + r.id, recurringId: r.id, name: r.name, type: r.type, status: 'PENDING',
+                amount: r.variableAmount ? null : r.amount, variableAmount: r.variableAmount,
+                dueDate: `${state.month}-${String(Math.min(r.dayOfMonth, new Date(y, m, 0).getDate())).padStart(2, '0')}`,
+                accountId: r.accountId, accountName: r.accountName, paymentMethodName: r.paymentMethodName,
+                categoryIcon: r.categoryIcon, categoryColor: r.categoryColor
+            }));
+    }
+    return items;
+}
+/** A pending recurring payment shaped like an entry, so it is listed (and sorted) together with the others. */
+function occAsTx(o) {
+    const rule = (state.rules || []).find(r => r.id === o.recurringId);
+    return {
+        occKey: o.key, name: o.name, date: o.dueDate, type: o.type, status: 'PENDING', amount: o.amount ?? 0, amountUnknown: o.amount == null,
+        accountId: o.accountId, accountName: o.accountName, paymentMethodName: o.paymentMethodName,
+        categoryId: rule?.categoryId ?? null, categoryName: rule?.categoryName ?? null, categoryIcon: o.categoryIcon, categoryColor: o.categoryColor, tags: []
+    };
+}
+
 function txRow(t) {
     const income = t.type === 'INCOME';
     const pending = t.status === 'PENDING';
     const late = pending && t.date < todayIso();
     const flag = pending ? `<span class="tag ${late ? 'late' : 'wait'}">${late ? 'Vencida' : income ? 'A receber' : 'A pagar'}</span>` : '';
+    const recurring = t.occKey ? `<span class="tag recur">${ico('repeat')} Recorrente</span>` : '';
     const parcel = t.installmentTotal ? `<span class="tag">${t.installmentNumber}/${t.installmentTotal}</span>` : '';
     const clip = state.attachCounts[t.id] ? `<span class="tag" title="Tem comprovante">${ico('paperclip')}</span>` : '';
-    const tags = parcel + clip + (t.tags || []).map(x => `<span class="tag">#${esc(x)}</span>`).join('');
+    const tags = recurring + parcel + clip + (t.tags || []).map(x => `<span class="tag">#${esc(x)}</span>`).join('');
     const picked = state.sel.on && state.sel.items.has(t.id);
-    return `<button class="row ${pending ? 'is-pending' : ''} ${picked ? 'picked' : ''}" data-id="${t.id}">
+    return `<button class="row ${pending ? 'is-pending' : ''} ${picked ? 'picked' : ''}" ${t.occKey ? `data-occ="${esc(t.occKey)}"` : `data-id="${t.id}"`}>
         ${state.sel.on ? `<span class="sel-box ${picked ? 'on' : ''}">${picked ? ico('check') : ''}</span>` : ''}
         ${avatar(t.categoryIcon, t.categoryColor)}
         <span class="grow"><span class="title">${esc(t.name)}</span>
         <span class="small muted">${esc(t.adjustment ? 'Correção de saldo' : txCategoryLabel(t))} · ${esc(t.accountName || '')}${t.paymentMethodName ? ' · ' + esc(t.paymentMethodName) : ''}<span class="tags">${flag}${tags}</span></span></span>
-        <span class="amount ${income ? 'income' : 'expense'}">${income ? '+' : '−'} ${moneyOf(t.accountId, t.amount)}</span>
+        <span class="amount ${income ? 'income' : 'expense'}">${t.amountUnknown ? 'a informar' : `${income ? '+' : '−'} ${moneyOf(t.accountId, t.amount)}`}</span>
     </button>`;
 }
 
@@ -548,6 +582,7 @@ function bindTxRows(root) {
         if (!tx) return;
         if (state.sel.on) toggleSelect(tx); else openTransactionSheet(tx);
     });
+    bindDueRows(root);
     $$('.row[data-transfer]', root).forEach(r => r.onclick = () => {
         if (state.sel.on) return toast('Transferências não entram na seleção.');
         const transfer = state.transfers.find(t => String(t.id) === r.dataset.transfer);
@@ -678,7 +713,7 @@ function categoryLegend(groups) {
                 <span class="small muted">${c.percent.toFixed(0)}%</span>
                 <strong>${money(c.total)}</strong>`;
         const head = c.id
-            ? `<button type="button" class="legend-row legend-link" data-root="${c.id}" title="Ver os lançamentos desta categoria">${row}</button>`
+            ? `<button type="button" class="legend-row legend-link" data-root="${c.id}" data-hold="category:${c.id}" title="Ver os lançamentos desta categoria">${row}</button>`
             : `<div class="legend-row">${row}</div>`;
         return head + c.children.map(k => `<div class="legend-row sub"><span class="grow">↳ ${esc(k.name)}</span><span class="small muted">${money(k.total)}</span></div>`).join('');
     }).join('');
@@ -921,6 +956,15 @@ async function paintTransactions() {
             (Number.isNaN(max) || Number(t.amount) <= max)
         ).forEach(t => items.push({date: t.date, tx: t}));
     }
+    // pending recurring payments sit with the other entries (not in a period search, which only reads what was saved)
+    if (!rangeActive() && (!type || type === 'PENDING' || type === 'EXPENSE' || type === 'INCOME') && Number.isNaN(min) && Number.isNaN(max)) {
+        recurringDue().map(occAsTx).filter(t =>
+            (!type || type === 'PENDING' || t.type === type) &&
+            (!q || [t.name, t.accountName, t.paymentMethodName, txCategoryLabel(t)].some(v => (v || '').toLowerCase().includes(q))) &&
+            (categoryId == null || t.categoryId === categoryId || catById(t.categoryId)?.parentId === categoryId) &&
+            (methodId == null || t.paymentMethodName === (state.methods.find(m => m.id === methodId) || {}).name)
+        ).forEach(t => items.push({date: t.date, tx: t}));
+    }
     const transfersAllowed = !rangeActive() && categoryId == null && methodId == null && Number.isNaN(min) && Number.isNaN(max);
     if ((!type || type === 'TRANSFER') && transfersAllowed) {
         state.transfers.filter(t => !q || [t.description, t.fromAccountName, t.toAccountName, 'transferência']
@@ -985,7 +1029,7 @@ function renderBudgets() {
         const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : '';
         const left = Number(c.budget) - spent;
         const extra = carryText(c);
-        return `<button class="card row" style="display:block;width:100%;text-align:left" data-cat="${c.categoryId}">
+        return `<button class="card row" style="display:block;width:100%;text-align:left" data-cat="${c.categoryId}" data-hold="category:${c.categoryId}">
             <span style="display:flex;gap:12px;align-items:center">${avatar(c.icon, c.color)}
             <span class="grow"><strong>${esc(c.parentId ? catLabel(catById(c.categoryId)) : c.name)}</strong><span class="small muted" style="display:block">${money(spent)} de ${money(c.budget)}</span></span>
             <strong class="${left < 0 ? 'expense' : ''}">${pct.toFixed(0)}%</strong></span>

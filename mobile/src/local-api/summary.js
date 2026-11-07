@@ -1,4 +1,4 @@
-import {addMonths, firstDay, fromCents, lastDay} from './util.js';
+import {addMonths, firstDay, fromCents, isoDate, lastDay} from './util.js';
 
 const TREND_MONTHS = 6;
 /** Quantos meses para tras a "sobra acumulada" olha, no maximo. */
@@ -50,6 +50,19 @@ export class Summary {
             if (o.status !== 'PENDING' || o.amount_cents == null || !(accountId == null ? inView(o.account_id) : accountId === o.account_id)) continue;
             if (o.type === 'INCOME') pendingIncome += o.amount_cents;
             else pendingExpense += o.amount_cents;
+        }
+        // Recurring payments whose occurrence of this month was not created yet (a future month, or a new month the app has not
+        // synced yet) are still to come: they count with the amount of the rule. Variable amounts are unknown, so they stay out.
+        if (month >= isoDate(this.db.clock()).slice(0, 7)) {
+            for (const r of this.db.all(`select r.type, r.account_id, r.amount_cents from recurring_payments r
+                                         where r.active = 1 and r.variable_amount = 0 and r.amount_cents is not null and r.start_month <= ?
+                                           and (r.end_month is null or r.end_month >= ?)
+                                           and not exists (select 1 from recurring_occurrences o where o.recurring_id = r.id and o.occurrence_month = ?)`,
+                [month, month, month])) {
+                if (!(accountId == null ? inView(r.account_id) : accountId === r.account_id)) continue;
+                if (r.type === 'INCOME') pendingIncome += r.amount_cents;
+                else pendingExpense += r.amount_cents;
+            }
         }
         const projected = balance + pendingIncome - pendingExpense;
 

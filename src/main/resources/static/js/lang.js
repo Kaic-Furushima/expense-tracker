@@ -1095,4 +1095,9 @@ const I18N_ENTRIES = [
     ['todas as contas (sem cartões e dinheiro guardado)', 'all accounts (without cards and saved money)', 'todas las cuentas (sin tarjetas ni dinero guardado)'],
     ['Usada nos totais. Cada conta, caixinha, desejo e orçamento pode ter a sua.', 'Used in the totals. Each account, pot, wish and budget can have its own.', 'Se usa en los totales. Cada cuenta, hucha, deseo y presupuesto puede tener la suya.'],
     ['Transferências entre contas não são receitas nem despesas. Para investir, transfira para a conta onde o dinheiro ficará guardado. Entre moedas diferentes, informe os dois valores.', 'Transfers between accounts are not income or expenses. To invest, transfer to the account where the money will be kept. Between different currencies, enter both amounts.', 'Las transferencias entre cuentas no son ingresos ni gastos. Para invertir, transfiere a la cuenta donde se guardará el dinero. Entre monedas distintas, indica los dos importes.'],
+    ['Segure uma conta para editar.', 'Press and hold an account to edit it.', 'Mantén pulsada una cuenta para editarla.'],
+    ['Arrastar para mover', 'Drag to move', 'Arrastrar para mover'],
+    ['Recorrente', 'Recurring', 'Recurrente'],
+    ['Pagamentos recorrentes não entram na seleção.', 'Recurring payments cannot be selected.', 'Los pagos recurrentes no se pueden seleccionar.'],
+    ['Este pagamento será criado quando o mês chegar.', 'This payment will be created when the month arrives.', 'Este pago se creará cuando llegue el mes.'],
 ];

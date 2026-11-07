@@ -249,10 +249,11 @@ function openAccountPicker() {
                 <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null && !state.currencyFilter ? check : ''}</button>
             ${otherCodes.map(code => { const t = totalsByCode.get(code); return `<button class="row" data-cur="${code}"><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
                 <span class="grow"><span class="title">${esc(T('Contas em {}').replace('{}', code))}</span><span class="small muted">${esc(T('Disponível'))} ${esc(money(t.available, code))}${t.hasSaved ? esc(` · ${T('guardado')} ${money(t.saved, code)}`) : ''}</span></span>${state.accountFilter == null && state.currencyFilter === code ? check : ''}</button>`; }).join('')}
-            ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}">${avatar(a.icon || 'bank', a.color)}
+            ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}" data-hold="account:${a.id}">${avatar(a.icon || 'bank', a.color)}
                 <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance, a.currency)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
             <button class="row" id="acc-new"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button>
-        </div>`);
+        </div>
+        <p class="small muted" style="margin-top:10px">Segure uma conta para editar.</p>`);
     $('#acc-new', sheet).onclick = () => { closeSheet(); openAccountSheet(null); };
     $$('[data-acc]', sheet).forEach(b => b.onclick = () => {
         state.accountFilter = nextId(b.dataset.acc);
@@ -278,8 +279,7 @@ function dueSection() {
     const monthEnd = `${state.month}-31`; // lexicographically after every date of the month
     const inScope = id => !state.accountFilter || id === state.accountFilter;
     const items = [];
-    state.occurrences.filter(o => o.status === 'PENDING' && inScope(o.accountId))
-        .forEach(o => items.push({date: o.dueDate, occ: o}));
+    recurringDue().forEach(o => items.push({date: o.dueDate, occ: o}));
     state.pendingAll.filter(t => t.date <= monthEnd && inScope(t.accountId))
         .forEach(t => items.push({date: t.date, tx: t}));
     if (!items.length) return '';
@@ -288,9 +288,9 @@ function dueSection() {
     const rows = items.map(it => {
         if (it.occ) {
             const o = it.occ;
-            return `<button class="row" data-occ="${o.id}">
+            return `<button class="row" data-occ="${esc(o.key)}">
                 ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
-                <span class="grow"><span class="title">${esc(o.name)}</span>
+                <span class="grow"><span class="title">${esc(o.name)} <span class="tag recur">${ico('repeat')} Recorrente</span></span>
                     <span class="small ${o.dueDate < today ? 'expense' : 'muted'}">${when(o.dueDate, o.type === 'INCOME')} · ${esc(o.accountName)}</span></span>
                 <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? moneyOf(o.accountId, o.amount) : 'a informar'}</span></button>`;
         }
@@ -305,8 +305,11 @@ function dueSection() {
 }
 function bindDueRows(root) {
     $$('[data-occ]', root).forEach(r => r.onclick = () => {
-        const o = state.occurrences.find(x => String(x.id) === r.dataset.occ);
-        if (o) openOccurrenceSheet(o);
+        if (state.sel.on) return toast('Pagamentos recorrentes não entram na seleção.');
+        const o = recurringDue().find(x => x.key === r.dataset.occ);
+        if (!o) return;
+        if (o.projected) toast('Este pagamento será criado quando o mês chegar.');
+        else openOccurrenceSheet(o);
     });
 }
 
@@ -638,7 +641,114 @@ function renderCategoriesPage() {
     }, other === 'INCOME' ? 'Categorias copiadas para Receitas' : 'Categorias copiadas para Despesas');
 }
 
+/* ---------- Press and hold: opens the edit screen of an account, category or pot wherever it shows up ---------- */
+const HOLD_OPENERS = {
+    account: id => { const a = accountById(id); if (a) openAccountSheet(a); },
+    category: id => { const c = state.categories.find(x => x.id === id); if (c) openCategorySheet(c); },
+    pot: id => { const p = state.pots.find(x => x.id === id); if (p) openPotSheet(p); }
+};
+(() => {
+    const HOLD_MS = 500;
+    let timer = null, start = null, fired = 0;
+    const cancel = () => {
+        clearTimeout(timer);
+        timer = null;
+        document.querySelectorAll('.holding').forEach(el => el.classList.remove('holding'));
+    };
+    const open = el => {
+        const [kind, id] = el.dataset.hold.split(':');
+        const opener = HOLD_OPENERS[kind];
+        if (!opener) return;
+        fired = Date.now();
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch { /* no vibration here */ }
+        opener(Number(id));
+    };
+    document.addEventListener('pointerdown', e => {
+        const el = e.target.closest && e.target.closest('[data-hold]');
+        if (!el || (e.pointerType === 'mouse' && e.button !== 0)) return;
+        cancel();
+        start = {x: e.clientX, y: e.clientY};
+        el.classList.add('holding');
+        timer = setTimeout(() => { cancel(); open(el); }, HOLD_MS);
+    });
+    document.addEventListener('pointermove', e => {
+        if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel', 'scroll'].forEach(name => document.addEventListener(name, cancel, true));
+    // the click that ends the press must not also run the normal tap action
+    document.addEventListener('click', e => {
+        if (Date.now() - fired < 700 && e.target.closest && e.target.closest('[data-hold]')) { e.preventDefault(); e.stopPropagation(); fired = 0; }
+    }, true);
+    // the system's own long-press menu (and the right mouse button) do the same thing
+    document.addEventListener('contextmenu', e => {
+        const el = e.target.closest && e.target.closest('[data-hold]');
+        if (!el) return;
+        e.preventDefault();
+        if (Date.now() - fired > 700) { cancel(); open(el); }
+    });
+})();
+
 /* ---------- Accounts ---------- */
+/** Saves a new order for the accounts that share a parent; the others keep their places. */
+function saveSiblingOrder(ordered, parentId, sibs) {
+    const next = ordered.map(a => a.id);
+    ordered.map((a, k) => (a.parentId === parentId ? k : -1)).filter(k => k >= 0).forEach((slot, k) => { next[slot] = sibs[k]; });
+    safeStorage.set(orderKey(), JSON.stringify(next));
+}
+
+/** The handle of an account in manual order: drag it up or down (or use the arrow keys) to put it somewhere else. */
+function bindAccountDrag(handle, ordered) {
+    const id = Number(handle.dataset.drag);
+    const me = ordered.find(a => a.id === id);
+    const sibs = ordered.filter(a => a.parentId === me.parentId).map(a => a.id);
+    const rowOf = x => document.querySelector(`.manual-row[data-id="${x}"]`);
+    handle.addEventListener('keydown', e => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const i = sibs.indexOf(id), j = i + (e.key === 'ArrowUp' ? -1 : 1);
+        if (j < 0 || j >= sibs.length) return;
+        const next = sibs.slice();
+        [next[i], next[j]] = [next[j], next[i]];
+        saveSiblingOrder(ordered, me.parentId, next);
+        renderAccountsPage();
+        const again = document.querySelector(`[data-drag="${id}"]`);
+        if (again) again.focus();
+    });
+    handle.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        const el = rowOf(id);
+        const others = sibs.filter(x => x !== id);
+        const startY = e.clientY;
+        let target = sibs.indexOf(id);
+        handle.setPointerCapture(e.pointerId);
+        el.classList.add('dragging');
+        const clearMarks = () => others.forEach(x => rowOf(x).classList.remove('drop-above', 'drop-below'));
+        const onMove = ev => {
+            el.style.transform = `translateY(${ev.clientY - startY}px)`;
+            const box = el.getBoundingClientRect();
+            const middle = box.top + box.height / 2;
+            target = others.filter(x => { const r = rowOf(x).getBoundingClientRect(); return r.top + r.height / 2 < middle; }).length;
+            clearMarks();
+            if (target < others.length) rowOf(others[target]).classList.add('drop-above');
+            else if (others.length) rowOf(others[others.length - 1]).classList.add('drop-below');
+        };
+        const end = ev => {
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', end);
+            handle.removeEventListener('pointercancel', end);
+            if (ev.type === 'pointerup' && target !== sibs.indexOf(id)) {
+                const next = others.slice();
+                next.splice(target, 0, id);
+                saveSiblingOrder(ordered, me.parentId, next);
+            }
+            renderAccountsPage();
+        };
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', end);
+        handle.addEventListener('pointercancel', end);
+    });
+}
+
 function renderAccountsPage() {
     const active = activeAccounts();
     const archived = state.accounts.filter(a => a.archived);
@@ -647,19 +757,14 @@ function renderAccountsPage() {
     const available = mainTotals.available, saved = mainTotals.saved;
     const otherCurrencies = [...totalsByCurrency.entries()].filter(([code]) => code !== currencyCode());
     const cardInfo = a => a.type === 'CREDIT_CARD' ? (a.closingDay && a.dueDay ? ` · fecha dia ${a.closingDay}, vence dia ${a.dueDay} · ver faturas` : ' · defina o fechamento') : '';
-    const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}">${avatar(a.icon || 'bank', a.color)}
+    const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}" data-hold="account:${a.id}">${avatar(a.icon || 'bank', a.color)}
         <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a) + cardInfo(a), a.saved ? 'guardado' : '', a.parentName ? 'dentro de ' + esc(a.parentName) : '', a.archived ? 'arquivada' : ''].filter(Boolean).join(' · ') || '&nbsp;'}</span></span>
         <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance, a.currency)}</span></button>`;
     const mode = accountSortMode();
-    // in manual mode every active account gets arrows to move it among its siblings
-    const manualRow = (a, list) => {
-        const sibs = list.filter(x => x.parentId === a.parentId);
-        const i = sibs.findIndex(x => x.id === a.id);
-        return `<div class="manual-row" style="display:flex;align-items:stretch;gap:6px">
+    // in manual mode every active account gets a handle at the edge: drag it (or use the arrow keys) to move it among its siblings
+    const manualRow = a => `<div class="manual-row" data-id="${a.id}" style="display:flex;align-items:stretch;gap:6px">
             <div style="flex:1;min-width:0;display:flex">${row(a).replace('<button class="row', '<button style="flex:1" class="row')}</div>
-            <div class="move-btns"><button type="button" class="icon-btn small" data-move="-1" data-id="${a.id}" aria-label="Subir" ${i <= 0 ? 'disabled' : ''}>${ico('arrow-up')}</button>
-            <button type="button" class="icon-btn small" data-move="1" data-id="${a.id}" aria-label="Descer" ${i >= sibs.length - 1 ? 'disabled' : ''}>${ico('arrow-down')}</button></div></div>`;
-    };
+            <button type="button" class="drag-handle" data-drag="${a.id}" aria-label="Arrastar para mover">${ico('grip')}</button></div>`;
     const ordered = orderedAccounts(active);
     $('#view').innerHTML = `<div class="stack">${pageHeader('Contas')}
         <div class="account-sort"><span class="small muted">Ordenar:</span>
@@ -669,7 +774,7 @@ function renderAccountsPage() {
             ${otherCurrencies.map(([code, t]) => `<div class="small muted" style="margin-top:6px">${esc(code)}: <strong>${money(t.available, code)}</strong>${t.hasSaved ? ` · guardado <strong>${money(t.saved, code)}</strong>` : ''}</div>`).join('')}
             ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
             ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só pagamentos feitos entram.`)}</div>
-        <div class="list">${ordered.map(a => mode === 'manual' ? manualRow(a, ordered) : row(a)).join('')}
+        <div class="list">${ordered.map(a => mode === 'manual' ? manualRow(a) : row(a)).join('')}
             <button class="row" id="new-account"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button></div>
         ${archived.length ? `<h2 class="section-title">Arquivadas</h2><div class="list">${orderedAccounts(archived).map(row).join('')}</div>` : ''}</div>`;
     bindBack();
@@ -679,22 +784,7 @@ function renderAccountsPage() {
         if (b.dataset.sort === 'manual' && !manualOrder().length) safeStorage.set(orderKey(), JSON.stringify(ordered.map(a => a.id)));
         renderAccountsPage();
     });
-    $$('[data-move]').forEach(b => b.onclick = e => {
-        e.stopPropagation();
-        const id = Number(b.dataset.id), dir = Number(b.dataset.move);
-        const ids = ordered.map(a => a.id);
-        const me = ordered.find(a => a.id === id);
-        const sibs = ordered.filter(a => a.parentId === me.parentId).map(a => a.id);
-        const i = sibs.indexOf(id), j = i + dir;
-        if (j < 0 || j >= sibs.length) return;
-        [sibs[i], sibs[j]] = [sibs[j], sibs[i]];
-        // position of each sibling in the saved order follows the swapped list
-        const slots = ids.map((x, k) => ordered[k].parentId === me.parentId ? k : -1).filter(k => k >= 0);
-        const next = ids.slice();
-        slots.forEach((slot, k) => { next[slot] = sibs[k]; });
-        safeStorage.set(orderKey(), JSON.stringify(next));
-        renderAccountsPage();
-    });
+    $$('[data-drag]').forEach(h => bindAccountDrag(h, ordered));
     $$('[data-account]').forEach(b => b.onclick = () => {
         const account = accountById(Number(b.dataset.account));
         if (account.type === 'CREDIT_CARD' && account.closingDay && account.dueDay && !account.archived) openInvoices(account);
@@ -973,7 +1063,7 @@ function renderGoals() {
         } else if (goal && balance >= goal) {
             hint += ' · meta atingida';
         }
-        return `<button class="card pot-card ${p.active ? '' : 'is-archived'}" data-pot="${p.id}">
+        return `<button class="card pot-card ${p.active ? '' : 'is-archived'}" data-pot="${p.id}" data-hold="pot:${p.id}">
             <span class="pot-top">${avatar(p.icon || 'coins', p.color)}
                 <span class="grow"><strong>${esc(p.name)}</strong><span class="small muted" style="display:block">${esc(hint)}</span></span>
                 <strong>${money(balance, p.currency)}</strong></span>

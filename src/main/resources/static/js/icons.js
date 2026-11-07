@@ -13,6 +13,7 @@ const ICONS = {
     'wifi-off': '<path d="M2 8.8a15 15 0 0 1 20 0M5 12.9a10 10 0 0 1 14 0M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M3 3l18 18"/>',
     package: '<path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/>',
     'arrow-up': '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    grip: '<path d="M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01" stroke-width="3"/>',
     'arrow-down': '<path d="M12 5v14M19 12l-7 7-7-7"/>',
     trending: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>',
     layers: '<path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/>',

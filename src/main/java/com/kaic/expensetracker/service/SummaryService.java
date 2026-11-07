@@ -4,12 +4,15 @@ import com.kaic.expensetracker.model.Category;
 import com.kaic.expensetracker.model.OccurrenceStatus;
 import com.kaic.expensetracker.model.RecurringOccurrence;
 import com.kaic.expensetracker.model.TransactionType;
+import com.kaic.expensetracker.model.RecurringPayment;
 import com.kaic.expensetracker.repository.RecurringOccurrenceRepository;
+import com.kaic.expensetracker.repository.RecurringPaymentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -40,10 +43,14 @@ public class SummaryService {
     private final SettingsService settings;
     private final AccountService accountService;
     private final RecurringOccurrenceRepository occurrenceRepository;
+    private final RecurringPaymentRepository recurringRepository;
+    private final Clock clock;
 
     public SummaryService(ExpenseService expenseService, BudgetService budgetService, CategoryService categoryService,
                           SettingsService settings, AccountService accountService,
-                          RecurringOccurrenceRepository occurrenceRepository) {
+                          RecurringOccurrenceRepository occurrenceRepository, RecurringPaymentRepository recurringRepository, Clock clock) {
+        this.recurringRepository = recurringRepository;
+        this.clock = clock;
         this.accountService = accountService;
         this.expenseService = expenseService;
         this.budgetService = budgetService;
@@ -97,6 +104,26 @@ public class SummaryService {
                 pendingIncome = pendingIncome.add(o.getAmount());
             } else {
                 pendingExpense = pendingExpense.add(o.getAmount());
+            }
+        }
+        // Recurring payments whose occurrence of this month was not created yet (a future month, or a new month not synced yet)
+        // are still to come: they count with the rule's amount. Variable amounts are unknown, so they stay out.
+        if (!month.isBefore(YearMonth.now(clock))) {
+            String key = month.toString();
+            for (RecurringPayment r : recurringRepository.findByActiveTrue()) {
+                boolean started = r.getStartMonth().compareTo(key) <= 0;
+                boolean notEnded = r.getEndMonth() == null || r.getEndMonth().compareTo(key) >= 0;
+                Long ruleAccount = r.getAccount().getId();
+                boolean inScope = accountId == null ? view.equals(currencies.get(ruleAccount)) : accountId.equals(ruleAccount);
+                if (!started || !notEnded || r.isVariableAmount() || r.getAmount() == null || !inScope
+                        || occurrenceRepository.existsByRecurringAndMonth(r, key)) {
+                    continue;
+                }
+                if (r.getType() == TransactionType.INCOME) {
+                    pendingIncome = pendingIncome.add(r.getAmount());
+                } else {
+                    pendingExpense = pendingExpense.add(r.getAmount());
+                }
             }
         }
         BigDecimal projected = balance.add(pendingIncome).subtract(pendingExpense);

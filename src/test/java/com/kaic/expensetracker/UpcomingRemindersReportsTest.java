@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class UpcomingRemindersReportsTest {
 
     @Autowired private UpcomingService upcomingService;
+    @Autowired private com.kaic.expensetracker.service.SummaryService summaryService;
     @Autowired private ReminderService reminderService;
     @Autowired private ReportService reportService;
     @Autowired private ExpenseService expenseService;
@@ -111,6 +112,26 @@ class UpcomingRemindersReportsTest {
         assertEquals(new BigDecimal("400.00"), later.startBalance()); // the overdue bill is paid before the period
         assertEquals(new BigDecimal("30.00"), later.outgoing());
         assertEquals(new BigDecimal("370.00"), later.endBalance());
+    }
+
+    @Test
+    void recurringPaymentsCountAsStillToPayInTheSummaryOfThisAndFutureMonths() {
+        Account a = account("Resumo recorrente", "0", AccountType.CHECKING, null, null);
+        recurringService.create(new RecurringService.Draft("Aluguel", TransactionType.EXPENSE, new BigDecimal("1000.00"), false,
+                5, a.getId(), null, null, true, YearMonth.from(today).toString(), null));
+        recurringService.create(new RecurringService.Draft("Extra", TransactionType.INCOME, new BigDecimal("300.00"), false,
+                8, a.getId(), null, null, true, YearMonth.from(today).toString(), null));
+        recurringService.create(new RecurringService.Draft("Agua", TransactionType.EXPENSE, null, true,
+                20, a.getId(), null, null, true, YearMonth.from(today).toString(), null));
+
+        // this month already has its occurrences; a future month has none yet, but the rules still count (variable amounts do not)
+        var now = summaryService.summarize(YearMonth.from(today), a.getId());
+        var future = summaryService.summarize(YearMonth.from(today).plusMonths(2), a.getId());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(now.pendingExpense()));
+        assertEquals(0, new BigDecimal("300.00").compareTo(now.pendingIncome()));
+        assertEquals(0, new BigDecimal("1000.00").compareTo(future.pendingExpense()));
+        assertEquals(0, new BigDecimal("300.00").compareTo(future.pendingIncome()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(summaryService.summarize(YearMonth.from(today).minusMonths(1), a.getId()).pendingExpense()));
     }
 
     @Test

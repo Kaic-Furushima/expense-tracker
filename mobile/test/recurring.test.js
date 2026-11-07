@@ -236,3 +236,35 @@ describe('resumo e "Por vir"', () => {
         assert.equal(Number.isNaN(u.endBalance), false);
     });
 });
+
+describe('a pagar e a receber no resumo', () => {
+    it('conta os recorrentes do mes atual, mesmo antes de a ocorrencia existir, e dos meses futuros', () => {
+        rule({name: 'Aluguel', amount: 1000});
+        rule({name: 'Salario extra', type: 'INCOME', amount: 300, dayOfMonth: 8});
+        rule({name: 'Agua', amount: null, variableAmount: true, dayOfMonth: 20}); // valor variavel: desconhecido, fica de fora
+        // o resumo e pedido antes de qualquer sincronizacao: ainda nao ha ocorrencias
+        api.db.run('delete from recurring_occurrences');
+        const may = ok('GET', '/api/summary?month=2026-05');
+        assert.deepEqual([may.pendingExpense, may.pendingIncome], [1000, 300]);
+        const july = ok('GET', '/api/summary?month=2026-07'); // mes futuro: nenhuma ocorrencia criada
+        assert.deepEqual([july.pendingExpense, july.pendingIncome], [1000, 300]);
+        assert.deepEqual([ok('GET', '/api/summary?month=2026-04').pendingExpense], [0]); // antes de comecar
+    });
+
+    it('nao conta duas vezes quando a ocorrencia ja existe, nem depois de paga', () => {
+        rule({amount: 1000});
+        assert.equal(ok('GET', '/api/summary?month=2026-05').pendingExpense, 1000);
+        const [o] = occurrences('2026-05');
+        assert.equal(ok('GET', '/api/summary?month=2026-05').pendingExpense, 1000);
+        ok('POST', `/recurring/occurrences/${o.id}/pay`, {});
+        assert.equal(ok('GET', '/api/summary?month=2026-05').pendingExpense, 0);
+    });
+
+    it('respeita o fim da regra e a conta escolhida', () => {
+        rule({amount: 500, endMonth: '2026-06'});
+        assert.equal(ok('GET', '/api/summary?month=2026-07').pendingExpense, 0);
+        assert.equal(ok('GET', '/api/summary?month=2026-06').pendingExpense, 500);
+        const other = ok('POST', '/accounts', {name: 'Outra'});
+        assert.equal(ok('GET', `/api/summary?month=2026-06&accountId=${other.id}`).pendingExpense, 0);
+    });
+});
