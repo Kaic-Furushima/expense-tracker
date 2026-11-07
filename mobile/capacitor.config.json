@@ -1,6 +1,6 @@
 {
   "appId": "com.kaic.expensetracker",
-  "appName": "Expense Tracker",
+  "appName": "Pocketful",
   "webDir": "www",
   "android": {
     "allowMixedContent": false

@@ -451,7 +451,7 @@ public class ProfileService {
         try {
             Files.createDirectories(file.getParent());
             try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                p.store(out, "Expense Tracker - perfis");
+                p.store(out, "Pocketful - perfis");
             }
         } catch (IOException e) {
             throw new IllegalStateException("Não foi possível salvar a lista de perfis", e);

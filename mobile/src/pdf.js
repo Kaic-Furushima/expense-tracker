@@ -30,8 +30,8 @@ export async function statementPdf(reports, d) {
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const title = reports.title(d);
     doc.setTitle(title);
-    doc.setCreator('Expense Tracker');
-    doc.setProducer('Expense Tracker');
+    doc.setCreator('Pocketful');
+    doc.setProducer('Pocketful');
 
     const supported = new Map([[regular, new Set(regular.getCharacterSet())], [bold, new Set(bold.getCharacterSet())]]);
     const safe = (text, font) => [...String(text ?? '').replace(/→/g, '->').replace(/−/g, '-').replace(/\s+/g, ' ')]
@@ -191,7 +191,7 @@ export async function statementPdf(reports, d) {
 
     // rodape de cada pagina
     pages.forEach((p, i) => {
-        const text = safe(m.t('Expense Tracker · página {0}', i + 1), regular);
+        const text = safe(m.t('Pocketful · página {0}', i + 1), regular);
         p.drawText(text, {x: (W - widthOf(text, regular, 8)) / 2, y: BOTTOM - 22, size: 8, font: regular, color: GRAY});
     });
     return doc.save();

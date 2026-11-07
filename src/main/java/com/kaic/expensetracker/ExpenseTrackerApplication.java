@@ -72,7 +72,7 @@ public class ExpenseTrackerApplication {
         }
         if (webView) {
             // The window opens at once with its own loading screen; the page is shown when the server is ready.
-            WebViewWindow.open("Expense Tracker", ExpenseTrackerApplication::exitProgram,
+            WebViewWindow.open("Pocketful", ExpenseTrackerApplication::exitProgram,
                     Paths.get(System.getProperty("app.data-dir", "./data")).toAbsolutePath().resolve("window.properties"));
         }
         try {
@@ -81,7 +81,7 @@ public class ExpenseTrackerApplication {
                     .run(args);
         } catch (RuntimeException e) {
             if (webView) {
-                WebViewWindow.showError("Não foi possível abrir o Expense Tracker. Veja o arquivo app.log na pasta de dados.");
+                WebViewWindow.showError("Não foi possível abrir o Pocketful. Veja o arquivo app.log na pasta de dados.");
             }
             throw e;
         }
@@ -167,9 +167,9 @@ public class ExpenseTrackerApplication {
         String port = env.getProperty("local.server.port", env.getProperty("server.port", "8080"));
         String bind = env.getProperty("server.address", "127.0.0.1");
         if (bind.equals("127.0.0.1") || bind.equals("localhost") || bind.equals("::1")) {
-            log.info("Expense Tracker disponível em http://localhost:{}/ (somente neste computador; para o celular, use run.bat celular)", port);
+            log.info("Pocketful disponível em http://localhost:{}/ (somente neste computador; para o celular, use run.bat celular)", port);
         } else {
-            log.info("Expense Tracker disponível em http://localhost:{}/ e na rede local em http://{}:{}/",
+            log.info("Pocketful disponível em http://localhost:{}/ e na rede local em http://{}:{}/",
                     port, localAddress(), port);
         }
 

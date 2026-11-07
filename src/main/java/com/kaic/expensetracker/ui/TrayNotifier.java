@@ -31,7 +31,7 @@ public final class TrayNotifier {
             return;
         }
         try {
-            TrayIcon created = new TrayIcon(image, "Expense Tracker");
+            TrayIcon created = new TrayIcon(image, "Pocketful");
             created.setImageAutoSize(true);
             PopupMenu menu = new PopupMenu();
             MenuItem open = new MenuItem("Abrir");

@@ -1,4 +1,4 @@
--- Hub de sincronizacao do Expense Tracker no Supabase.
+-- Hub de sincronizacao do Pocketful no Supabase.
 -- Como usar: crie um projeto em supabase.com, abra "SQL Editor", cole este arquivo inteiro e execute.
 -- Em Authentication > Providers deixe so "Email" ligado; crie a sua conta pelo proprio app (ou desligue novos cadastros
 -- depois de criar a sua em Authentication > Sign In / Providers).

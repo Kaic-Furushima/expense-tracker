@@ -161,14 +161,14 @@ public class ReportService {
                 @Override
                 public void onEndPage(PdfWriter w, Document document) {
                     PdfContentByte cb = w.getDirectContent();
-                    Phrase footer = new Phrase(m.t("Expense Tracker · página {0}", w.getPageNumber()),
+                    Phrase footer = new Phrase(m.t("Pocketful · página {0}", w.getPageNumber()),
                             FontFactory.getFont(FontFactory.HELVETICA, 8, Color.GRAY));
                     ColumnText.showTextAligned(cb, Element.ALIGN_CENTER, footer,
                             (document.right() + document.left()) / 2, document.bottom() - 18, 0);
                 }
             });
             doc.addTitle(title(d));
-            doc.addCreator("Expense Tracker");
+            doc.addCreator("Pocketful");
             doc.open();
 
             Font h1 = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18, new Color(0x2F, 0x7D, 0x6D));

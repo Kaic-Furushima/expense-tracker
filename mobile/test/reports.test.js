@@ -143,13 +143,13 @@ describe('PDF', () => {
         const doc = await PDFDocument.load(bytes);
         assert.equal(doc.getPageCount(), 1);
         assert.equal(doc.getTitle(), 'Extrato');
-        assert.equal(doc.getCreator(), 'Expense Tracker');
+        assert.equal(doc.getCreator(), 'Pocketful');
         const text = pdfText(bytes).join('\n').replace(/ /g, ' ');
         for (const piece of ['Extrato', 'Período: 01/05/2026 a 31/05/2026 · gerado em 15/05/2026', 'Receitas', 'R$ 3.000,00', 'R$ 320,50',
             'Saldo do período', 'R$ 2.679,50', 'Ainda a pagar: R$ 120,00 · ainda a receber: R$ 400,00 (não entram nos totais acima)',
             'Despesas por categoria', 'Mercado', 'Alimentação › Padaria', '94%', '6%', 'Lançamentos (5)', 'Luz (a pagar)', 'Freela (a receber)',
             'Mercado Extra #casa', '+ R$ 3.000,00', '- R$ 300,50', 'Transferências entre contas (não entram nos totais)',
-            'Conta principal -> Carteira', 'Expense Tracker · página 1']) {
+            'Conta principal -> Carteira', 'Pocketful · página 1']) {
             assert.ok(text.includes(piece), `faltou "${piece}" em:\n${text}`);
         }
         assert.ok(!text.includes('Apagada') && !text.includes('Abril'));
@@ -171,7 +171,7 @@ describe('PDF', () => {
         const text = pdfText(bytes);
         const headers = text.filter(t => t === 'Descrição').length;
         assert.equal(headers, pages); // um cabecalho de tabela em cada pagina
-        assert.ok(text.includes(`Expense Tracker · página ${pages}`));
+        assert.ok(text.includes(`Pocketful · página ${pages}`));
         assert.equal(text.filter(t => /^Compra número \d+$/.test(t)).length, 120);
     });
 
@@ -187,7 +187,7 @@ describe('PDF', () => {
         populate();
         ok('PUT', '/app/language', {language: 'en'});
         const text = pdfText(await pdf({month: '2026-05'})).join('\n');
-        for (const piece of ['Statement', 'Period: 01/05/2026 to 31/05/2026', 'Income', 'Balance for the period', 'Entries (5)', 'Luz (to pay)', 'Expense Tracker · page 1']) {
+        for (const piece of ['Statement', 'Period: 01/05/2026 to 31/05/2026', 'Income', 'Balance for the period', 'Entries (5)', 'Luz (to pay)', 'Pocketful · page 1']) {
             assert.ok(text.includes(piece), `faltou "${piece}"`);
         }
     });

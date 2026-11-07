@@ -47,7 +47,7 @@ public class ReminderNotifier {
         if (fresh.size() <= MAX_SEPARATE) {
             fresh.forEach(r -> TrayNotifier.show(prefix + r.title(), r.detail()));
         } else {
-            TrayNotifier.show(prefix + messages.t("Expense Tracker: {0} lembretes", fresh.size()),
+            TrayNotifier.show(prefix + messages.t("Pocketful: {0} lembretes", fresh.size()),
                     fresh.stream().limit(3).map(ReminderService.Reminder::title).reduce((a, b) -> a + "\n" + b).orElse("")
                             + "\n" + messages.t("…abra o app para ver todos."));
         }

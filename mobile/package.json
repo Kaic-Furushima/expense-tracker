@@ -2,7 +2,7 @@
   "name": "expense-tracker-mobile",
   "version": "0.1.0",
   "private": true,
-  "description": "Expense Tracker para Android: o mesmo front-end, com a lógica rodando no aparelho (SQLite) e sem precisar de servidor.",
+  "description": "Pocketful para Android: o mesmo front-end, com a lógica rodando no aparelho (SQLite) e sem precisar de servidor.",
   "type": "module",
   "scripts": {
     "build": "node scripts/build-www.mjs",

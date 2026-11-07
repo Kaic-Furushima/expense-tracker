@@ -39,13 +39,13 @@ public class Messages {
         add("Confira os lançamentos pendentes e como ficaram os orçamentos.",
                 "Check your pending entries and how your budgets ended up.",
                 "Revisa los movimientos pendientes y cómo quedaron los presupuestos.");
-        add("Expense Tracker: {0} lembretes", "Expense Tracker: {0} reminders", "Expense Tracker: {0} recordatorios");
+        add("Pocketful: {0} lembretes", "Pocketful: {0} reminders", "Pocketful: {0} recordatorios");
         add("…abra o app para ver todos.", "…open the app to see them all.", "…abre la app para verlos todos.");
         // reports
         add("Extrato", "Statement", "Extracto");
         add("{0} a {1}", "{0} to {1}", "{0} a {1}");
         add("Sem categoria", "No category", "Sin categoría");
-        add("Expense Tracker · página {0}", "Expense Tracker · page {0}", "Expense Tracker · página {0}");
+        add("Pocketful · página {0}", "Pocketful · page {0}", "Pocketful · página {0}");
         add("Período: {0} · gerado em {1}", "Period: {0} · generated on {1}", "Período: {0} · generado el {1}");
         add("Período: {0}", "Period: {0}", "Período: {0}");
         add("Receitas", "Income", "Ingresos");

@@ -399,7 +399,7 @@ function widgetsCard() {
     const locked = state.security && state.security.passwordSet;
     return `<h2 class="section-title">Widgets</h2>
         <div class="card stack-tight">
-            <p class="small muted">Para adicionar um widget, segure a tela inicial, toque em Widgets e escolha Expense Tracker. Há widgets de saldo, orçamento e caixinha.</p>
+            <p class="small muted">Para adicionar um widget, segure a tela inicial, toque em Widgets e escolha Pocketful. Há widgets de saldo, orçamento e caixinha.</p>
             <label class="switch-row"><input type="checkbox" id="widgets-pw" ${w.withPassword() ? 'checked' : ''}>
                 <span><strong>Mostrar os widgets mesmo com senha</strong>
                 ${info('Desligado: widgets ocultos quando há senha. Ligado: mostra saldos sem senha; abrir pelo widget pede a senha.')}</span></label>
@@ -458,7 +458,7 @@ async function loadAbout() {
         if (info.startupAvailable) {
             box.insertAdjacentHTML('beforeend', `<label class="switch-row"><input type="checkbox" id="startup" ${info.startupEnabled ? 'checked' : ''}>
                 <span><strong>Iniciar com o Windows</strong>
-                <span class="small muted" style="display:block">Abre o Expense Tracker com o Windows, direto na bandeja (só para este usuário).</span></span></label>`);
+                <span class="small muted" style="display:block">Abre o Pocketful com o Windows, direto na bandeja (só para este usuário).</span></span></label>`);
             $('#startup', box).onchange = async e => {
                 try {
                     await api('/api/about/startup', {method: 'PUT', body: {enabled: e.target.checked}});
@@ -536,7 +536,7 @@ function renderMoreMenu() {
         </div>
         <h2 class="section-title">Sobre</h2>
         <div class="card about" id="about-box">
-            <p><strong>Expense Tracker</strong> <span class="small muted" id="about-version"></span></p>
+            <p><strong>Pocketful</strong> <span class="small muted" id="about-version"></span></p>
             <p class="small muted" id="about-folder"></p>
             ${window.localApp ? '' : `<p class="small muted about-keys"><span><kbd>Ctrl</kbd>+<kbd>N</kbd> novo lançamento</span> · <span><kbd>/</kbd> buscar</span> · <span><kbd>←</kbd><kbd>→</kbd> mudar o mês</span></p>`}
             <button class="btn block" id="open-data" hidden>${ico('folder')} Abrir pasta de dados</button>

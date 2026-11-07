@@ -11,8 +11,8 @@
 	<groupId>com.kaic</groupId>
 	<artifactId>expensetracker</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>Expense Tracker</name>
-	<description>Expense Tracker</description>
+	<name>Pocketful</name>
+	<description>Pocketful</description>
 	<url/>
 	<licenses>
 		<license/>

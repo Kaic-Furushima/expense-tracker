@@ -53,7 +53,7 @@ export function installNativeNotifications(getApi) {
         if (!fresh.length) return;
         const list = fresh.length <= 3
             ? fresh.map(r => ({title: r.title, body: r.detail, key: r.key}))
-            : [{title: messages.t('Expense Tracker: {0} lembretes', fresh.length), key: `summary:${fresh[0].key}`,
+            : [{title: messages.t('Pocketful: {0} lembretes', fresh.length), key: `summary:${fresh[0].key}`,
                 body: `${fresh.slice(0, 3).map(r => r.title).join('\n')}\n${messages.t('…abra o app para ver todos.')}`}];
         await LocalNotifications.schedule({
             notifications: list.map(n => ({id: notificationId(`now:${n.key}`), title: n.title, body: n.body, channelId: CHANNEL, isExactNotification: false,

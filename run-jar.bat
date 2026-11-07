@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Expense Tracker
+title Pocketful
 set BIND=127.0.0.1
 if /i "%~1"=="celular" set BIND=0.0.0.0
 if not exist "%~dp0target\expensetracker-0.0.1-SNAPSHOT.jar" (

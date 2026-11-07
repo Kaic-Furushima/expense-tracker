@@ -738,7 +738,7 @@ function welcomeCard() {
     const step = (key, icon, title, detail) => `<button class="row" data-welcome="${key}"><span class="avatar" style="background:var(--surface-2)">${ico(icon)}</span>
         <span class="grow"><span class="title">${esc(title)}</span><span class="small muted">${esc(detail)}</span></span><span class="muted">${ico('chevron-right')}</span></button>`;
     return `<div class="card welcome">
-        <h2>Bem-vindo ao Expense Tracker</h2>
+        <h2>Bem-vindo ao Pocketful</h2>
         <p class="small muted">Em quatro passos você organiza tudo. Pode fazer na ordem que quiser.</p>
         <div class="list">
             ${step('categories', 'tag', 'Revise as categorias', 'Já vêm algumas prontas; ajuste como quiser.')}
@@ -1781,7 +1781,7 @@ function showLogin() {
     document.body.classList.add('locked');
     $('#view').innerHTML = `<div class="card login">
         <div class="login-mark">${ico('wallet')}</div>
-        <h2>Expense Tracker</h2>
+        <h2>Pocketful</h2>
         <p class="small muted">Digite a senha para abrir.</p>
         <form id="login-form" novalidate>
             <div class="field"><label for="login-pass">Senha</label><input id="login-pass" type="password" autocomplete="current-password"></div>

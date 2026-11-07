@@ -163,7 +163,7 @@ public final class WebViewWindow {
 
     /** Shows an error in the window, for when the program could not start. */
     public static void showError(String message) {
-        show(() -> engine.loadContent(page("<div><strong>Expense Tracker</strong><p>" + escape(message) + "</p></div>", darkTheme)));
+        show(() -> engine.loadContent(page("<div><strong>Pocketful</strong><p>" + escape(message) + "</p></div>", darkTheme)));
     }
 
     private static void show(Runnable action) {
@@ -192,12 +192,12 @@ public final class WebViewWindow {
                 + ".spin { width: 44px; height: 44px; margin: 0 auto; border-radius: 50%; border: 4px solid rgba(127, 127, 127, .25);"
                 + " border-top-color: " + accent + "; animation: spin .9s linear infinite; }"
                 + "@keyframes spin { to { transform: rotate(360deg); } }";
-        return "<!doctype html><html><head><meta charset=\"utf-8\"><title>Expense Tracker</title><style>" + css
+        return "<!doctype html><html><head><meta charset=\"utf-8\"><title>Pocketful</title><style>" + css
                 + "</style></head><body><div class=\"wrap\">" + inner + "</div></body></html>";
     }
 
     private static String loadingPage(boolean dark) {
-        return page("<div class=\"spin\"></div><div><strong>Expense Tracker</strong><p>Carregando…</p></div>", dark);
+        return page("<div class=\"spin\"></div><div><strong>Pocketful</strong><p>Carregando…</p></div>", dark);
     }
 
     private static String escape(String text) {

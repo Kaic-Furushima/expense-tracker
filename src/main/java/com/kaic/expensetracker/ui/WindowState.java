@@ -66,7 +66,7 @@ public final class WindowState {
         try {
             Files.createDirectories(file.toAbsolutePath().getParent());
             try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                p.store(out, "Expense Tracker: tamanho, posição e tema da janela (não editar à mão)");
+                p.store(out, "Pocketful: tamanho, posição e tema da janela (não editar à mão)");
             }
         } catch (IOException e) {
             log.warn("Não foi possível guardar o estado da janela", e);

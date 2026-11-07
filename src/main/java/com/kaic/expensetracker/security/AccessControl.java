@@ -199,7 +199,7 @@ public class AccessControl {
                 return;
             }
             try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                p.store(out, "Expense Tracker - senha de acesso (não editar à mão)");
+                p.store(out, "Pocketful - senha de acesso (não editar à mão)");
             }
         } catch (IOException e) {
             throw new IllegalStateException("Não foi possível salvar a senha de acesso", e);
