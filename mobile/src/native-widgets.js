@@ -7,6 +7,13 @@ import {buildSnapshot} from './widget-snapshot.js';
 // - Com senha no app, os widgets ficam desativados (so um aviso) a menos que a pessoa ligue "mostrar mesmo com senha".
 // - O botao "+" do widget abre o app em expensetracker://widget/new: depois da senha (se houver), abre "Novo lancamento".
 
+/** O app esta no tema escuro agora? (escolha da pessoa; em automatico, o do aparelho) */
+function isDark() {
+    const theme = document.documentElement.dataset.theme;
+    if (theme) return theme === 'dark';
+    try { return matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+}
+
 const Widgets = registerPlugin('Widgets');
 const WITH_PASSWORD_KEY = 'widgets-with-password';
 const ACTION_KEY = 'widget-action';
@@ -37,7 +44,7 @@ export function installNativeWidgets({getApi, access}) {
         try {
             const api = getApi();
             const snapshot = buildSnapshot({
-                api, messages: api.services.messages, passwordSet: access.passwordSet(), withPassword: withPassword()
+                api, messages: api.services.messages, passwordSet: access.passwordSet(), withPassword: withPassword(), dark: isDark()
             });
             await Widgets.update({json: JSON.stringify(snapshot)});
         } catch (e) {
@@ -87,6 +94,8 @@ export function installNativeWidgets({getApi, access}) {
     }).catch(() => {});
 
     refresh();
+    // trocou o tema do app: os widgets acompanham
+    try { new MutationObserver(() => api.refreshSoon()).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']}); } catch (e) { /* sem observador: atualiza na proxima abertura */ }
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') refresh();
         else if (timer != null) { // indo para segundo plano com uma atualizacao pendente: manda agora, o timer pode nao rodar

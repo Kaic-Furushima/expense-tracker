@@ -13,7 +13,7 @@ const percentOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100)
  * @param passwordSet  se o app tem senha
  * @param withPassword se a pessoa deixou os widgets funcionarem mesmo com senha
  */
-export function buildSnapshot({api, messages, passwordSet, withPassword, now = Date.now()}) {
+export function buildSnapshot({api, messages, passwordSet, withPassword, dark = false, now = Date.now()}) {
     const t = (text, ...args) => messages.t(text, ...args);
     const texts = {
         blocked: t('Aplicativo bloqueado por senha. Widgets desativados.'),
@@ -21,7 +21,7 @@ export function buildSnapshot({api, messages, passwordSet, withPassword, now = D
         add: t('Novo lançamento'),
         open: t('Abra o app para ativar o widget.')
     };
-    if (passwordSet && !withPassword) return {v: 1, at: now, blocked: true, texts, balances: [], progress: []};
+    if (passwordSet && !withPassword) return {v: 1, at: now, dark, blocked: true, texts, balances: [], progress: []};
 
     const money = (value, currency) => messages.money(value, currency);
     const get = url => api.handle('GET', url).body;
@@ -64,5 +64,5 @@ export function buildSnapshot({api, messages, passwordSet, withPassword, now = D
             progress: goal > 0 ? Math.min(100, percentOf(saved, goal)) : -1, negative: saved < 0
         });
     }
-    return {v: 1, at: now, blocked: false, texts, balances, progress};
+    return {v: 1, at: now, dark, blocked: false, texts, balances, progress};
 }

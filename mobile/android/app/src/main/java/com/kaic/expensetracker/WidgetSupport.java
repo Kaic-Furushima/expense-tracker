@@ -6,6 +6,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.net.Uri;
 import android.view.View;
 import android.widget.RemoteViews;
@@ -97,6 +98,16 @@ final class WidgetSupport {
 
     static void render(Context context, AppWidgetManager manager, int id) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget);
+        JSONObject themed = snapshot(context);
+        // segue o tema do app (o enviado no resumo), nao o do aparelho; sem resumo ainda, o do aparelho
+        boolean dark = themed != null && themed.has("dark") ? themed.optBoolean("dark")
+                : (context.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        int textColor = Color.parseColor(dark ? "#ECEFF1" : "#1B1F24");
+        int mutedColor = Color.parseColor(dark ? "#9AA5AF" : "#5F6B76");
+        int negativeColor = Color.parseColor(dark ? "#EF9A9A" : "#C62828");
+        views.setInt(R.id.widget_root, "setBackgroundResource", dark ? R.drawable.widget_bg_d : R.drawable.widget_bg);
+        for (int view : new int[]{R.id.widget_title, R.id.widget_sub}) views.setTextColor(view, mutedColor);
+        views.setTextColor(R.id.widget_message, textColor);
         String kind = kindOf(context, id);
         SharedPreferences prefs = prefs(context);
         String key = prefs.getString("key_" + id, defaultKey(kind));
@@ -117,7 +128,7 @@ final class WidgetSupport {
         }
 
         if (message != null) {
-            for (int view : new int[]{R.id.widget_title, R.id.widget_main, R.id.widget_sub, R.id.widget_bar}) {
+            for (int view : new int[]{R.id.widget_title, R.id.widget_main, R.id.widget_sub, R.id.widget_bar, R.id.widget_bar_d}) {
                 views.setViewVisibility(view, View.GONE);
             }
             views.setViewVisibility(R.id.widget_message, View.VISIBLE);
@@ -128,13 +139,18 @@ final class WidgetSupport {
             views.setViewVisibility(R.id.widget_main, View.VISIBLE);
             views.setTextViewText(R.id.widget_title, item.optString("name"));
             views.setTextViewText(R.id.widget_main, item.optString("main"));
-            views.setTextColor(R.id.widget_main, context.getColor(item.optBoolean("negative") ? R.color.widget_negative : R.color.widget_text));
+            views.setTextColor(R.id.widget_main, item.optBoolean("negative") ? negativeColor : textColor);
             String sub = item.optString("sub");
             views.setViewVisibility(R.id.widget_sub, sub.isEmpty() ? View.GONE : View.VISIBLE);
             views.setTextViewText(R.id.widget_sub, sub);
             int progress = item.optInt("progress", -1);
-            views.setViewVisibility(R.id.widget_bar, progress >= 0 ? View.VISIBLE : View.GONE);
-            if (progress >= 0) views.setProgressBar(R.id.widget_bar, 100, progress, false);
+            int barId = dark ? R.id.widget_bar_d : R.id.widget_bar;
+            views.setViewVisibility(R.id.widget_bar, View.GONE);
+            views.setViewVisibility(R.id.widget_bar_d, View.GONE);
+            if (progress >= 0) {
+                views.setViewVisibility(barId, View.VISIBLE);
+                views.setProgressBar(barId, 100, progress, false);
+            }
         }
 
         views.setViewVisibility(R.id.widget_add, button ? View.VISIBLE : View.GONE);
