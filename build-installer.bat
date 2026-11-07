@@ -21,11 +21,11 @@ if exist "%~dp0target\runtime" rmdir /s /q "%~dp0target\runtime"
 if exist "%~dp0installer" rmdir /s /q "%~dp0installer"
 if exist "%~dp0target\jpackage-input" rmdir /s /q "%~dp0target\jpackage-input"
 mkdir "%~dp0target\jpackage-input"
-copy /y "%~dp0target\expensetracker-0.0.1-SNAPSHOT.jar" "%~dp0target\jpackage-input\" >nul
+copy /y "%~dp0target\expense-tracker-0.0.1-SNAPSHOT.jar" "%~dp0target\jpackage-input\" >nul
 rem The upgrade UUID must never change: it lets a new .msi replace the installed version instead of installing beside it.
 "%JPACKAGE%" --type msi --name Pocketful --app-version 0.0.1 --vendor "Kaic F" ^
   --description "Pocketful: controle de gastos pessoais" ^
-  --input "%~dp0target\jpackage-input" --main-jar expensetracker-0.0.1-SNAPSHOT.jar ^
+  --input "%~dp0target\jpackage-input" --main-jar expense-tracker-0.0.1-SNAPSHOT.jar ^
   --dest "%~dp0installer" --runtime-image "%~dp0target\runtime" ^
   --icon "%~dp0packaging\app.ico" ^
   --win-menu --win-menu-group "Pocketful" --win-shortcut --win-dir-chooser ^
@@ -33,6 +33,9 @@ rem The upgrade UUID must never change: it lets a new .msi replace the installed
   --java-options "-Dapp.window-mode=true" ^
   --java-options "-Dfile.encoding=UTF-8" || exit /b 1
 
+rem O app instalado continua se chamando Pocketful; so o arquivo do instalador segue o padrao expense-tracker-*.
+ren "%~dp0installer\Pocketful-0.0.1.msi" expense-tracker-0.0.1.msi || exit /b 1
+
 echo.
-echo Pronto: %~dp0installer\Pocketful-0.0.1.msi
+echo Pronto: %~dp0installer\expense-tracker-0.0.1.msi
 pause

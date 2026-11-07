@@ -95,6 +95,7 @@
 	</dependencies>
 
 	<build>
+		<finalName>expense-tracker-${project.version}</finalName>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

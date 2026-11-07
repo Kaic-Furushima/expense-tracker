@@ -29,6 +29,12 @@ android {
             versionNameSuffix = "-sync"
         }
     }
+    // Nome do APK: expense-tracker-<flavor>-<tipo>.apk (ex.: expense-tracker-offline-debug.apk)
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "expense-tracker-${variant.flavorName}-${variant.buildType.name}.apk"
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
