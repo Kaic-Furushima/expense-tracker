@@ -36,24 +36,27 @@ public class BudgetController {
 
     /** Limits of every category in force in a month (default: the current one). */
     @GetMapping
-    public List<BudgetResponse> getAll(@RequestParam(required = false) YearMonth month) {
-        return budgetService.effectiveInMonth(month == null ? YearMonth.now() : month).stream()
-                .map(e -> new BudgetResponse(e.categoryId(), e.amount(), e.fromMonth()))
+    public List<BudgetResponse> getAll(@RequestParam(required = false) YearMonth month,
+                                       @RequestParam(required = false) String currency) {
+        return budgetService.effectiveInMonth(month == null ? YearMonth.now() : month, currency).stream()
+                .map(e -> new BudgetResponse(e.categoryId(), e.amount(), e.fromMonth(), e.currency()))
                 .toList();
     }
 
     @GetMapping("/total")
-    public TotalResponse total(@RequestParam(required = false) YearMonth month) {
-        var effective = budgetService.effectiveTotal(month == null ? YearMonth.now() : month);
+    public TotalResponse total(@RequestParam(required = false) YearMonth month,
+                               @RequestParam(required = false) String currency) {
+        var effective = budgetService.effectiveTotal(month == null ? YearMonth.now() : month, currency);
         return new TotalResponse(effective.map(BudgetService.Effective::amount).orElse(null),
-                effective.map(BudgetService.Effective::fromMonth).orElse(null));
+                effective.map(BudgetService.Effective::fromMonth).orElse(null),
+                effective.map(BudgetService.Effective::currency).orElse(null));
     }
 
     @PutMapping("/total")
     public TotalResponse setTotal(@RequestParam(required = false) YearMonth month, @Valid @RequestBody BudgetRequest request) {
         YearMonth m = month == null ? YearMonth.now() : month;
-        budgetService.set(null, m, request.amount(), scope(request));
-        return total(m);
+        budgetService.set(null, m, request.amount(), scope(request), request.currency());
+        return total(m, "*");
     }
 
     @DeleteMapping("/total")
@@ -67,10 +70,10 @@ public class BudgetController {
     public BudgetResponse set(@PathVariable Long categoryId, @RequestParam(required = false) YearMonth month,
                               @Valid @RequestBody BudgetRequest request) {
         YearMonth m = month == null ? YearMonth.now() : month;
-        budgetService.set(categoryId, m, request.amount(), scope(request));
-        return budgetService.effectiveInMonth(m).stream()
+        budgetService.set(categoryId, m, request.amount(), scope(request), request.currency());
+        return budgetService.effectiveInMonth(m, "*").stream()
                 .filter(e -> categoryId.equals(e.categoryId()))
-                .map(e -> new BudgetResponse(e.categoryId(), e.amount(), e.fromMonth()))
+                .map(e -> new BudgetResponse(e.categoryId(), e.amount(), e.fromMonth(), e.currency()))
                 .findFirst().orElseThrow();
     }
 
@@ -89,12 +92,13 @@ public class BudgetController {
             @NotNull(message = "Informe o limite.")
             @DecimalMin(value = "0.01", message = "O limite deve ser de pelo menos 0,01.")
             @DecimalMax(value = "999999999.99", message = "O limite é alto demais.") BigDecimal amount,
-            BudgetService.Scope scope) {
+            BudgetService.Scope scope,
+            @jakarta.validation.constraints.Size(max = 3, message = "Moeda inválida.") String currency) {
     }
 
-    public record BudgetResponse(Long categoryId, BigDecimal amount, String fromMonth) {
+    public record BudgetResponse(Long categoryId, BigDecimal amount, String fromMonth, String currency) {
     }
 
-    public record TotalResponse(BigDecimal amount, String fromMonth) {
+    public record TotalResponse(BigDecimal amount, String fromMonth, String currency) {
     }
 }

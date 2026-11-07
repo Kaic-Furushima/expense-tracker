@@ -52,6 +52,10 @@ public class Pot extends SyncEntity {
     @JoinColumn(name = "account_id")
     private Account account;
 
+    /** ISO code of the pot's currency; null means the main one. With an account, the account's currency is the one that counts. */
+    @Column(length = 3)
+    private String currency;
+
     public YearMonth start() {
         return YearMonth.parse(startMonth);
     }

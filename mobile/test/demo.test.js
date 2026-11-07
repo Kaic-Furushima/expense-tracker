@@ -30,7 +30,7 @@ describe('dados de exemplo', () => {
     it('cria contas (com um cartao), a caixinha dentro do Nubank, 6 meses de lancamentos, transferencias e orcamentos', () => {
         load();
         const accounts = ok('GET', '/accounts');
-        assert.deepEqual(accounts.map(a => a.name).sort(), ['Bradesco', 'Caixinha Nubank', 'Carteira', 'Cartão Nubank', 'Conta principal', 'Nubank', 'Santander']);
+        assert.deepEqual(accounts.map(a => a.name).sort(), ['Bradesco', 'Caixinha Nubank', 'Carteira', 'Cartão Nubank', 'Conta principal', 'Nubank', 'Santander', 'Wise']);
         const card = accounts.find(a => a.name === 'Cartão Nubank');
         assert.deepEqual([card.type, card.closingDay, card.dueDay], ['CREDIT_CARD', 25, 5]);
         assert.equal(accounts.find(a => a.name === 'Carteira').type, 'WALLET');
@@ -39,7 +39,7 @@ describe('dados de exemplo', () => {
         assert.equal(accounts.find(a => a.name === 'Santander').color, '#E53935');
 
         const all = ok('GET', '/expenses?sort=date,asc');
-        assert.equal(all.length, 122); // 6 meses de lancamentos + as parcelas do notebook (10) e da geladeira (12) + 2 a pagar/receber
+        assert.equal(all.length, 143); // 6 meses de lancamentos + as parcelas do notebook (10) e da geladeira (12) + 2 a pagar/receber
         assert.equal(ok('GET', '/transfers?month=2026-05').length, 2); // aporte na caixinha e saque para a carteira
         assert.equal(ok('GET', '/transfers?month=2026-04').length, 1);
         const mercado = all.filter(e => e.name === 'Mercado').map(e => [e.date, e.amount]);
@@ -57,9 +57,24 @@ describe('dados de exemplo', () => {
         assert.deepEqual(ok('GET', '/recurring').map(r => r.name), ['Aluguel recebido', 'Conta de água', 'Plano de saúde', 'Seguro do carro']);
         assert.equal(ok('GET', '/recurring').find(r => r.name === 'Conta de água').variableAmount, true);
         const pots = ok('GET', '/pots');
-        assert.deepEqual(pots.map(p => [p.name, p.balance, p.accountName]), [['Equipamentos', 600, null], ['Reserva de emergência', 1800, 'Santander'], ['Viagem', 1700, 'Nubank']]);
-        assert.deepEqual(ok('GET', '/wishes').map(w => w.name), ['Bicicleta', 'Cadeira ergonômica', 'Fone de ouvido']);
+        assert.deepEqual(pots.map(p => [p.name, p.balance, p.accountName]), [['Equipamentos', 600, null], ['Reserva de emergência', 1800, 'Santander'], ['Reserva Nubank', 2489.1, 'Caixinha Nubank'], ['Viagem', 1700, 'Nubank'], ['Viagem internacional', 400, null]]);
+        assert.deepEqual(ok('GET', '/wishes').map(w => w.name), ['Kindle', 'Bicicleta', 'Cadeira ergonômica', 'Fone de ouvido']);
         assert.deepEqual(ok('GET', '/templates').map(t => t.name), ['Almoço', 'Café', 'Uber']);
+    });
+
+    it('tem dinheiro guardado e uma conta em dolar, com transferencia entre moedas, caixinha, desejo e orcamento em dolar', () => {
+        load();
+        const accounts = ok('GET', '/accounts');
+        assert.equal(accounts.find(a => a.name === 'Caixinha Nubank').saved, true);
+        const wise = accounts.find(a => a.name === 'Wise');
+        assert.deepEqual([wise.currency, wise.balance], ['USD', 4274.3]);
+        const fev = ok('GET', '/transfers?month=2026-02').find(t => t.description === 'Envio para a Wise');
+        assert.deepEqual([fev.amount, fev.toAmount], [2000, 380]);
+        assert.equal(ok('GET', '/pots').find(p => p.name === 'Viagem internacional').currency, 'USD');
+        assert.equal(ok('GET', '/wishes').find(w => w.name === 'Kindle').currency, 'USD');
+        assert.deepEqual(ok('GET', '/budgets?month=2026-05&currency=USD').map(b => b.amount), [50]);
+        const usd = ok('GET', '/api/summary?month=2026-05&currency=USD');
+        assert.equal(usd.income, 420);
     });
 
     it('no mes atual so vai ate hoje; a conta de luz fica a pagar no dia 28', () => {
@@ -80,7 +95,7 @@ describe('dados de exemplo', () => {
         assert.equal(s.income, 6063.35); // salario + freelance (850) + rendimentos da caixinha (13,35)
         assert.equal(s.expense, 3365.8);
         assert.ok(s.categories.find(c => c.name === 'Mercado').budget === 700);
-        assert.equal(ok('GET', '/accounts').find(a => a.name === 'Santander').balance, 22121.2);
+        assert.equal(ok('GET', '/accounts').find(a => a.name === 'Santander').balance, 20121.2);
     });
 
     it('rodar de novo nao duplica nada', () => {
@@ -97,7 +112,7 @@ describe('dados de exemplo', () => {
         ok('DELETE', '/api/data');
         assert.equal(ok('GET', '/expenses').length, 0);
         load();
-        assert.equal(ok('GET', '/expenses').length, 122);
+        assert.equal(ok('GET', '/expenses').length, 143);
         assert.deepEqual(ok('GET', '/trash').map(t => t.kind), ['EVERYTHING']);
     });
 

@@ -38,7 +38,7 @@ describe('limpar tudo (tudo para a lixeira)', () => {
 
         const [copy] = snapshots();
         assert.deepEqual([copy.title, copy.amount, copy.date, copy.deletedAt], ['Todos os dados', null, null, '2026-05-15T12:00:00.000']);
-        assert.equal(copy.detail, '122 lançamentos · 7 contas · 17 categorias · 7 orçamentos · 4 recorrentes · 3 caixinhas');
+        assert.equal(copy.detail, '143 lançamentos · 8 contas · 18 categorias · 8 orçamentos · 4 recorrentes · 5 caixinhas');
     });
 
     it('o app volta a funcionar do zero (ids recomecam, da para lançar)', () => {

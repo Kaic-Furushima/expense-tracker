@@ -35,11 +35,12 @@ public class ReportController {
                                             @RequestParam(required = false) YearMonth month,
                                             @RequestParam(required = false) LocalDate from,
                                             @RequestParam(required = false) LocalDate to,
-                                            @RequestParam(required = false) Long accountId) {
+                                            @RequestParam(required = false) Long accountId,
+                                            @RequestParam(required = false) String currency) {
         LocalDate start = from != null ? from : (month == null ? YearMonth.now() : month).atDay(1);
         LocalDate end = to != null ? to : from != null ? from.plusMonths(1).minusDays(1)
                 : (month == null ? YearMonth.now() : month).atEndOfMonth();
-        ReportService.Data data = service.collect(start, end, accountId);
+        ReportService.Data data = service.collect(start, end, accountId, currency);
         String name = "extrato-" + (from == null && to == null ? start.toString().substring(0, 7) : start + "_a_" + end);
         boolean pdf = format.equalsIgnoreCase("pdf");
         if (!pdf && !format.equalsIgnoreCase("xlsx")) {

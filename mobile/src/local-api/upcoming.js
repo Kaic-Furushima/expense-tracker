@@ -16,7 +16,7 @@ export class Upcoming {
         this.recurring = recurring;
     }
 
-    compute(from, to, accountId) {
+    compute(from, to, accountId, currency = null) {
         const today = isoDate(this.db.clock());
         for (const [value, label] of [[from, 'inicial'], [to, 'final']]) {
             if (value && !isIsoDate(value)) throw badRequest(`Data ${label} inválida.`);
@@ -39,7 +39,16 @@ export class Upcoming {
         all.push(...this.recurring.upcoming(end, accountId, today)); // recorrentes pendentes e dos proximos meses
         all.push(...this.invoices.unpaid(end, accountId, today)); // faturas de cartao ainda a pagar
 
-        let startBalance = this.currentBalance(accountId);
+        // so entra o que e da mesma moeda: a da conta olhada, a pedida ou a principal
+        const currencies = this.catalog.accountCurrencies();
+        const view = accountId != null ? (currencies.get(accountId) ?? this.catalog.mainCurrency()) : (currency || this.catalog.mainCurrency());
+        if (accountId == null) {
+            const byName = new Map(this.db.all('select id, name from accounts').map(a => [a.name, currencies.get(a.id)]));
+            const kept = all.filter(i => byName.get(i.accountName) === view);
+            all.splice(0, all.length, ...kept);
+        }
+
+        let startBalance = this.currentBalance(accountId, view);
         const items = [];
         for (const item of all) {
             if (start > today && item.date < start) startBalance += (item.type === 'INCOME' ? 1 : -1) * (item.cents ?? 0); // valor variavel: ainda sem valor
@@ -55,7 +64,7 @@ export class Upcoming {
             else outgoing += item.cents;
         }
         return {
-            from: start, to: end,
+            from: start, to: end, currency: view,
             startBalance: fromCents(startBalance), incoming: fromCents(incoming), outgoing: fromCents(outgoing),
             endBalance: fromCents(startBalance + incoming - outgoing), unknownAmounts: unknown,
             items: items.map(i => ({kind: i.kind, id: i.id, date: i.date, name: i.name, type: i.type, amount: fromCents(i.cents),
@@ -64,11 +73,12 @@ export class Upcoming {
     }
 
     /** Dinheiro disponivel hoje: toda conta propria ativa, menos cartoes de credito (a divida aparece nas faturas). */
-    currentBalance(accountId) {
+    currentBalance(accountId, view) {
         const balances = this.catalog.balances();
         let total = 0;
-        for (const a of this.db.all('select id, type, archived, parent_id, initial_cents from accounts')) {
-            const counts = accountId != null ? a.id === accountId : !a.archived && a.parent_id == null && a.type !== 'CREDIT_CARD';
+        const currencies = this.catalog.accountCurrencies();
+        for (const a of this.db.all('select id, type, archived, saved, initial_cents from accounts')) {
+            const counts = accountId != null ? a.id === accountId : !a.archived && !a.saved && a.type !== 'CREDIT_CARD' && currencies.get(a.id) === view;
             if (counts) total += balances.get(a.id) ?? a.initial_cents;
         }
         return total;

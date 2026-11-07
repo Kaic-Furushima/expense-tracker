@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 class CsvExportTest {
 
-    private static final String HEADER = "data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao";
+    private static final String HEADER = "data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao;moeda;valor_destino;moeda_destino";
 
     @Autowired private ApiController api;
     @Autowired private ExpenseService expenses;
@@ -73,7 +73,7 @@ class CsvExportTest {
         String mercado = rows[0].contains("Mercado") ? rows[0] : rows[1];
         assertTrue(mercado.startsWith("2030-06-01;EXPENSE;\"Mercado\";"), mercado);
         assertTrue(mercado.contains(";20.50;"), "valor com ponto e sem formatação");
-        assertTrue(mercado.endsWith(";PAGO;\"\";\"compra do mês\""), mercado);
+        assertTrue(mercado.endsWith(";PAGO;\"\";\"compra do mês\";\"BRL\";;"), mercado);
     }
 
     @Test

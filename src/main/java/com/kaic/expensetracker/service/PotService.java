@@ -1,5 +1,6 @@
 package com.kaic.expensetracker.service;
 
+import com.kaic.expensetracker.model.Account;
 import com.kaic.expensetracker.model.Pot;
 import com.kaic.expensetracker.model.PotEntry;
 import com.kaic.expensetracker.model.PotEntryKind;
@@ -34,10 +35,14 @@ public class PotService {
     private final WishItemRepository wishItems;
     private final Clock clock;
     private final AccountRepository accounts;
+    private final AccountService accountService;
+    private final SettingsService settings;
 
     public PotService(PotRepository pots, PotEntryRepository entries, WishItemRepository wishItems, Clock clock,
-                      AccountRepository accounts) {
+                      AccountRepository accounts, AccountService accountService, SettingsService settings) {
         this.clock = clock;
+        this.accountService = accountService;
+        this.settings = settings;
         this.accounts = accounts;
         this.pots = pots;
         this.entries = entries;
@@ -46,11 +51,16 @@ public class PotService {
 
     /** Fields of a pot, as typed by the user. */
     public record Draft(String name, String color, String icon, BigDecimal goal, PotMode mode,
-                        BigDecimal monthlyAmount, String startMonth, boolean active, Long accountId) {
+                        BigDecimal monthlyAmount, String startMonth, boolean active, Long accountId, String currency) {
+
+        public Draft(String name, String color, String icon, BigDecimal goal, PotMode mode,
+                     BigDecimal monthlyAmount, String startMonth, boolean active, Long accountId) {
+            this(name, color, icon, goal, mode, monthlyAmount, startMonth, active, accountId, null);
+        }
 
         public Draft(String name, String color, String icon, BigDecimal goal, PotMode mode,
                      BigDecimal monthlyAmount, String startMonth, boolean active) {
-            this(name, color, icon, goal, mode, monthlyAmount, startMonth, active, null);
+            this(name, color, icon, goal, mode, monthlyAmount, startMonth, active, null, null);
         }
     }
 
@@ -66,8 +76,32 @@ public class PotService {
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "Caixinha não encontrada: " + id));
     }
 
+    /** Linked to an account marked as saved money, a pot shows that account's balance (it has none of its own). */
+    public boolean isMirrored(Pot pot) {
+        return pot.getAccount() != null && Boolean.TRUE.equals(pot.getAccount().getSaved());
+    }
+
+    /** With an account, the account's currency; without one, the pot's own (or the main one). */
+    public String currencyOf(Pot pot) {
+        if (pot.getAccount() != null) {
+            return accountService.currencyOf(pot.getAccount());
+        }
+        return pot.getCurrency() == null ? settings.currency() : pot.getCurrency();
+    }
+
     public BigDecimal balanceOf(Pot pot) {
+        if (isMirrored(pot)) {
+            Account account = pot.getAccount();
+            return accountService.balances().getOrDefault(account.getId(), account.getInitialBalance());
+        }
         return entries.balanceOf(pot);
+    }
+
+    private void requireOwnBalance(Pot pot) {
+        if (isMirrored(pot)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "O saldo desta caixinha vem da conta “" + pot.getAccount().getName()
+                    + "”. Para guardar ou tirar dinheiro, faça uma transferência.");
+        }
     }
 
     public List<PotEntry> entriesOf(Long potId) {
@@ -104,13 +138,16 @@ public class PotService {
     @Transactional
     public PotEntry deposit(Long potId, BigDecimal amount, LocalDate date, String note) {
         requirePositive(amount);
-        return addEntry(getOrThrow(potId), amount.setScale(2, RoundingMode.HALF_UP), date, PotEntryKind.MANUAL, note, null, null);
+        Pot pot = getOrThrow(potId);
+        requireOwnBalance(pot);
+        return addEntry(pot, amount.setScale(2, RoundingMode.HALF_UP), date, PotEntryKind.MANUAL, note, null, null);
     }
 
     @Transactional
     public PotEntry withdraw(Long potId, BigDecimal amount, LocalDate date, String note) {
         requirePositive(amount);
         Pot pot = getOrThrow(potId);
+        requireOwnBalance(pot);
         BigDecimal value = amount.setScale(2, RoundingMode.HALF_UP);
         if (balanceOf(pot).compareTo(value) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Saldo da caixinha insuficiente.");
@@ -132,6 +169,7 @@ public class PotService {
     /** Used by the wish list when an item is paid with the pot. */
     @Transactional
     public PotEntry recordPurchase(Pot pot, BigDecimal price, LocalDate date, String note, Long wishItemId) {
+        requireOwnBalance(pot);
         if (balanceOf(pot).compareTo(price) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Saldo da caixinha insuficiente.");
         }
@@ -143,7 +181,8 @@ public class PotService {
     public synchronized void sync() {
         YearMonth now = YearMonth.now();
         for (Pot pot : pots.findByActiveTrue()) {
-            if (pot.getMode() != PotMode.FIXED || pot.getMonthlyAmount() == null || pot.getMonthlyAmount().signum() <= 0) {
+            if (pot.getMode() != PotMode.FIXED || pot.getMonthlyAmount() == null || pot.getMonthlyAmount().signum() <= 0
+                    || isMirrored(pot)) { // a pot that shows its account's balance has no contribution of its own
                 continue;
             }
             for (YearMonth m = pot.start(); !m.isAfter(now); m = m.plusMonths(1)) {
@@ -197,6 +236,19 @@ public class PotService {
         pot.setActive(d.active());
         pot.setAccount(d.accountId() == null ? null : accounts.findById(d.accountId()).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada: " + d.accountId())));
+        // with an account the account's currency counts; without one, the chosen (not sent = keep; the main one = none)
+        if (pot.getAccount() != null) {
+            pot.setCurrency(null);
+        } else if (d.currency() != null) {
+            String code = d.currency().trim().toUpperCase();
+            if (code.isEmpty() || code.equals(settings.currency())) {
+                pot.setCurrency(null);
+            } else if (SettingsService.CURRENCIES.contains(code)) {
+                pot.setCurrency(code);
+            } else {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Moeda não suportada.");
+            }
+        }
     }
 
     private static void requirePositive(BigDecimal amount) {

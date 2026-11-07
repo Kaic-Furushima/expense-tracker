@@ -38,10 +38,15 @@ public class TransferService {
     }
 
     public record Draft(Long fromAccountId, Long toAccountId, BigDecimal amount, LocalDate date, String description,
-                        String invoiceMonth) {
+                        String invoiceMonth, BigDecimal toAmount) {
+
+        public Draft(Long fromAccountId, Long toAccountId, BigDecimal amount, LocalDate date, String description,
+                     String invoiceMonth) {
+            this(fromAccountId, toAccountId, amount, date, description, invoiceMonth, null);
+        }
 
         public Draft(Long fromAccountId, Long toAccountId, BigDecimal amount, LocalDate date, String description) {
-            this(fromAccountId, toAccountId, amount, date, description, null);
+            this(fromAccountId, toAccountId, amount, date, description, null, null);
         }
     }
 
@@ -105,6 +110,18 @@ public class TransferService {
         transfer.setFromAccount(from);
         transfer.setToAccount(to);
         transfer.setAmount(d.amount().setScale(2, RoundingMode.HALF_UP));
+        // between different currencies the amount that arrived is another number: the person gives both sides
+        if (accountService.currencyOf(from).equals(accountService.currencyOf(to))) {
+            transfer.setToAmount(null);
+        } else {
+            if (d.toAmount() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o valor que chegou na conta de destino.");
+            }
+            if (d.toAmount().compareTo(MIN) < 0 || d.toAmount().compareTo(MAX) > 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um valor entre 0,01 e 999.999.999,99.");
+            }
+            transfer.setToAmount(d.toAmount().setScale(2, RoundingMode.HALF_UP));
+        }
         transfer.setDate(date);
         if (d.invoiceMonth() != null) {
             transfer.setInvoiceMonth(d.invoiceMonth());

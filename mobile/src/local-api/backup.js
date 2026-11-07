@@ -19,7 +19,7 @@ const FROM_H2 = {
     payment_methods: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     accounts: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', type: 'type', color: 'color', icon: 'icon', initial_cents: ['initial_balance', 'cents'],
-        archived: ['archived', 'bool'], parent_id: 'parent_id', closing_day: 'closing_day', due_day: 'due_day', saved: ['saved', 'bool']
+        archived: ['archived', 'bool'], parent_id: 'parent_id', closing_day: 'closing_day', due_day: 'due_day', saved: ['saved', 'bool'], currency: 'currency'
     },
     expenses: {
         id: 'id', uuid: 'uuid', name: 'name', description: 'description', amount_cents: ['amount', 'cents'], date: 'date', type: 'type',
@@ -29,9 +29,9 @@ const FROM_H2 = {
     },
     tags: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name'},
     expense_tags: {expense_id: 'expense_id', tag_id: 'tag_id'},
-    budgets: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], category_id: 'category_id', from_month: 'from_month', amount_cents: ['amount', 'cents']},
+    budgets: {id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], category_id: 'category_id', from_month: 'from_month', amount_cents: ['amount', 'cents'], currency: 'currency'},
     transfers: {
-        id: 'id', uuid: 'uuid', from_account_id: 'from_account_id', to_account_id: 'to_account_id', amount_cents: ['amount', 'cents'],
+        id: 'id', uuid: 'uuid', from_account_id: 'from_account_id', to_account_id: 'to_account_id', amount_cents: ['amount', 'cents'], to_amount_cents: ['to_amount', 'cents'],
         date: 'date', description: 'description', invoice_month: 'invoice_month', created_at: ['created_at', 'ts'],
         updated_at: ['updated_at', 'ts'], deleted_at: ['deleted_at', 'ts']
     },
@@ -46,12 +46,12 @@ const FROM_H2 = {
     },
     pots: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', color: 'color', icon: 'icon', goal_cents: ['goal', 'cents'], mode: 'mode',
-        monthly_cents: ['monthly_amount', 'cents'], start_month: 'start_month', active: ['active', 'bool'], account_id: 'account_id'
+        monthly_cents: ['monthly_amount', 'cents'], start_month: 'start_month', active: ['active', 'bool'], account_id: 'account_id', currency: 'currency'
     },
     wish_items: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], name: 'name', estimated_cents: ['estimated_price', 'cents'], notes: 'notes', url: 'url', status: 'status',
         pot_id: 'pot_id', real_cents: ['real_price', 'cents'], purchase_date: 'purchase_date', expense_id: 'expense_id',
-        created_at: ['created_at', 'ts']
+        created_at: ['created_at', 'ts'], currency: 'currency'
     },
     pot_entries: {
         id: 'id', uuid: 'uuid', updated_at: ['updated_at', 'ts'], pot_id: 'pot_id', entry_date: 'entry_date', amount_cents: ['amount', 'cents'], kind: 'kind', note: 'note',

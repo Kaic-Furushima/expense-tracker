@@ -70,10 +70,13 @@ public class DemoDataService {
         Account caixinha = accountService.findOrCreate("Caixinha Nubank", AccountType.INVESTMENT, "#43A047");
         if (caixinha.getParent() == null) {
             accountService.update(caixinha.getId(), new AccountService.Draft(caixinha.getName(), caixinha.getType(),
-                    caixinha.getColor(), caixinha.getIcon(), caixinha.getInitialBalance(), nubank.getId(), false));
+                    caixinha.getColor(), caixinha.getIcon(), caixinha.getInitialBalance(), nubank.getId(), false, null, null,
+                    true, null)); // marked as saved money: it is left out of the total and shown small below it
         }
         Account carteira = account("Carteira", AccountType.WALLET, "#FB8C00", "200", null, null);
         Account cartao = account("Cartão Nubank", AccountType.CREDIT_CARD, "#7B1FA2", "0", 25, 5);
+        // An account in dollars: it has its own totals, charts and budgets.
+        Account wise = account("Wise", AccountType.CHECKING, "#00B9A0", "1500", null, null, "USD");
 
         YearMonth now = YearMonth.now();
         int today = LocalDate.now(clock).getDayOfMonth();
@@ -115,6 +118,15 @@ public class DemoDataService {
                 add(m, day.applyAsInt(16), TransactionType.EXPENSE, "Hospedagem", "Viagem", "980.00", cartao, "Crédito", "viagem");
                 add(m, day.applyAsInt(23), TransactionType.EXPENSE, "Presente", "Presentes", "180.00", cartao, "Crédito", "presente");
             }
+            add(m, day.applyAsInt(7), TransactionType.INCOME, "Freelance internacional", "Freelance", (420 + b * 15) + ".00", wise, "Transferência");
+            add(m, day.applyAsInt(4), TransactionType.EXPENSE, "Hospedagem de site", "Assinaturas", "12.00", wise, "Débito");
+            add(m, day.applyAsInt(15), TransactionType.EXPENSE, "Ferramenta de design", "Software", "29.00", wise, "Débito");
+            if (b % 2 == 0) {
+                add(m, day.applyAsInt(22), TransactionType.EXPENSE, "Livros", "Educação", "34.90", wise, "Débito");
+            }
+            if (b == 3) {
+                transfer(m, day.applyAsInt(12), santander, wise, "2000.00", "Envio para a Wise", "380.00");
+            }
             if (b == 0) {
                 addPending(m, 28, TransactionType.EXPENSE, "Conta de luz", "Moradia", "142.30", santander);
                 addPending(m, 27, TransactionType.INCOME, "Freelance a receber", "Freelance", "600.00", nubank, "trabalho");
@@ -130,6 +142,7 @@ public class DemoDataService {
         budget("Saúde", "300");
         budget("Assinaturas", "120");
         budget("Pets", "150");
+        budgetService.upsert(category("Software", TransactionType.EXPENSE).getId(), new BigDecimal("50"), "USD");
 
         recurring("Plano de saúde", TransactionType.EXPENSE, "389.90", false, 10, santander, "Débito", "Saúde");
         recurring("Seguro do carro", TransactionType.EXPENSE, "210.00", false, 15, bradesco, "Débito", "Transporte");
@@ -147,10 +160,21 @@ public class DemoDataService {
         if (equipamentos != null) {
             deposit(equipamentos, now.minusMonths(1), 12, "600.00", null);
         }
+        // A pot in dollars, with no account linked.
+        Pot viagemUsd = pot("Viagem internacional", "#4DB6AC", "plane", "3000", PotMode.VARIABLE, null, null, null, "USD");
+        if (viagemUsd != null) {
+            deposit(viagemUsd, now.minusMonths(1), 10, "250.00", null);
+            deposit(viagemUsd, now, Math.min(2, today), "150.00", null);
+        }
+        // A pot linked to a saved-money account: it shows that account's balance.
+        pot("Reserva Nubank", "#43A047", "landmark", "10000", PotMode.VARIABLE, null, null, caixinha, null);
         Long equipamentosId = potService.findAll().stream().filter(p -> p.getName().equals("Equipamentos")).map(Pot::getId).findFirst().orElse(null);
         wish("Fone de ouvido", "450.00", "Com cancelamento de ruído", null, equipamentosId);
         wish("Cadeira ergonômica", "1200.00", null, null, equipamentosId);
         wish("Bicicleta", "1800.00", null, "https://exemplo.com/bicicleta", null);
+        if (wishService.findAll().stream().noneMatch(w -> w.getName().equals("Kindle"))) {
+            wishService.create(new WishService.Draft("Kindle", new BigDecimal("120.00"), null, null, null, "USD"));
+        }
 
         template("Almoço", TransactionType.EXPENSE, "35.00", "Alimentação", bradesco, "Débito");
         template("Uber", TransactionType.EXPENSE, "25.00", "Transporte", santander, "Pix");
@@ -164,9 +188,14 @@ public class DemoDataService {
     }
 
     private Account account(String name, AccountType type, String color, String initial, Integer closingDay, Integer dueDay) {
+        return account(name, type, color, initial, closingDay, dueDay, null);
+    }
+
+    private Account account(String name, AccountType type, String color, String initial, Integer closingDay, Integer dueDay,
+                            String currency) {
         return accountService.findAll().stream().filter(a -> a.getName().equals(name)).findFirst()
                 .orElseGet(() -> accountService.create(new AccountService.Draft(name, type, color, null,
-                        new BigDecimal(initial), null, false, closingDay, dueDay)));
+                        new BigDecimal(initial), null, false, closingDay, dueDay, null, currency)));
     }
 
     private Category category(String name, TransactionType kind) {
@@ -236,12 +265,18 @@ public class DemoDataService {
     }
 
     private void transfer(YearMonth month, int day, Account from, Account to, String amount, String description) {
+        transfer(month, day, from, to, amount, description, null);
+    }
+
+    /** toAmount: what arrived, when the two accounts are in different currencies. */
+    private void transfer(YearMonth month, int day, Account from, Account to, String amount, String description, String toAmount) {
         LocalDate date = month.atDay(Math.max(1, Math.min(day, month.lengthOfMonth())));
         boolean alreadyThere = transferService.findByMonth(month, null).stream().anyMatch(t ->
                 t.getFromAccount().getId().equals(from.getId()) && t.getToAccount().getId().equals(to.getId())
                         && t.getDate().equals(date) && t.getAmount().compareTo(new BigDecimal(amount)) == 0);
         if (!alreadyThere) {
-            transferService.create(new TransferService.Draft(from.getId(), to.getId(), new BigDecimal(amount), date, description));
+            transferService.create(new TransferService.Draft(from.getId(), to.getId(), new BigDecimal(amount), date, description,
+                    null, toAmount == null ? null : new BigDecimal(toAmount)));
         }
     }
 
@@ -257,11 +292,16 @@ public class DemoDataService {
 
     /** Creates the pot unless it exists; returns it only when it was just created (so its deposits are not repeated). */
     private Pot pot(String name, String color, String icon, String goal, PotMode mode, String monthly, String startMonth, Account account) {
+        return pot(name, color, icon, goal, mode, monthly, startMonth, account, null);
+    }
+
+    private Pot pot(String name, String color, String icon, String goal, PotMode mode, String monthly, String startMonth, Account account,
+                    String currency) {
         if (potService.findAll().stream().anyMatch(p -> p.getName().equals(name))) {
             return null;
         }
         return potService.create(new PotService.Draft(name, color, icon, new BigDecimal(goal), mode,
-                monthly == null ? null : new BigDecimal(monthly), startMonth, true, account == null ? null : account.getId()));
+                monthly == null ? null : new BigDecimal(monthly), startMonth, true, account == null ? null : account.getId(), currency));
     }
 
     private void deposit(Pot pot, YearMonth month, int day, String amount, String note) {

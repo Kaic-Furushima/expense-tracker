@@ -46,7 +46,7 @@ public class InvoiceController {
     @PostMapping("/{month}/pay")
     public ResponseEntity<InvoiceResponse> pay(@PathVariable Long accountId, @PathVariable YearMonth month,
                                                @Valid @RequestBody PayRequest request) {
-        service.pay(accountId, month, request.fromAccountId(), request.amount(), request.date());
+        service.pay(accountId, month, request.fromAccountId(), request.amount(), request.date(), request.fromAmount());
         return ResponseEntity.status(HttpStatus.CREATED).body(InvoiceResponse.fromInvoice(service.get(accountId, month)));
     }
 
@@ -54,7 +54,8 @@ public class InvoiceController {
             @NotNull(message = "Informe de qual conta sai o pagamento.") Long fromAccountId,
             @DecimalMin(value = "0.01", message = "O valor deve ser de pelo menos 0,01.")
             @DecimalMax(value = "999999999.99", message = "O valor é alto demais.") BigDecimal amount,
-            LocalDate date) {
+            LocalDate date,
+            @DecimalMax(value = "999999999.99", message = "O valor é alto demais.") BigDecimal fromAmount) {
     }
 
     public record InvoiceResponse(String month, LocalDate startDate, LocalDate closingDate, LocalDate dueDate,

@@ -59,7 +59,7 @@ export class Invoices {
 
     build(card, month, rows = [], payments = [], withItems = false) {
         const total = rows.reduce((sum, e) => sum + (e.type === 'INCOME' ? -e.amount_cents : e.amount_cents), 0);
-        const paid = payments.reduce((sum, t) => sum + t.amount_cents, 0);
+        const paid = payments.reduce((sum, t) => sum + (t.to_amount_cents ?? t.amount_cents), 0);
         const remaining = Math.max(total - paid, 0);
         const closing = closingDate(card, month);
         const today = isoDate(this.db.clock());
@@ -112,8 +112,13 @@ export class Invoices {
             const value = amount ?? fromCents(invoice.remainingCents);
             if (!(value > 0)) throw conflict('Esta fatura não tem nada a pagar.');
             const [y, m] = month.split('-');
+            // pagando de uma conta em outra moeda, a pessoa diz quanto saiu da origem (o valor da fatura e o que chega no cartao)
+            const from = this.catalog.account(body.fromAccountId);
+            const main = this.catalog.mainCurrency();
+            const sameCurrency = (from.currency ?? main) === (card.currency ?? main);
+            if (!sameCurrency && (body.fromAmount == null || body.fromAmount === '')) throw invalid({fromAmount: 'Informe quanto saiu da conta de origem.'});
             this.transfers.create({
-                fromAccountId: body.fromAccountId, toAccountId: cardId, amount: value, date: body.date,
+                fromAccountId: body.fromAccountId, toAccountId: cardId, amount: sameCurrency ? value : body.fromAmount, toAmount: value, date: body.date,
                 description: `Fatura ${card.name} ${m}/${y}`
             }, month);
             const {byMonth: b2, payments: p2} = this.groups(card);

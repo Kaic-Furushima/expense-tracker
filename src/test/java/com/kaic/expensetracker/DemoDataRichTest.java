@@ -43,7 +43,12 @@ class DemoDataRichTest {
         assertEquals(3, count("pots where name in ('Viagem', 'Reserva de emergência', 'Equipamentos')"));
         assertEquals(3, count("wish_items where name in ('Fone de ouvido', 'Cadeira ergonômica', 'Bicicleta')"));
         assertEquals(3, count("expense_templates where name in ('Almoço', 'Uber', 'Café')"));
-        assertEquals(7, count("budgets"));
+        assertEquals(8, count("budgets"));
+        assertEquals(1, count("accounts where name = 'Wise' and currency = 'USD'"));
+        assertEquals(1, count("transfers where description = 'Envio para a Wise' and amount = 2000 and to_amount = 380"));
+        assertEquals(1, count("pots where name = 'Viagem internacional' and currency = 'USD'"));
+        assertEquals(1, count("wish_items where name = 'Kindle' and currency = 'USD'"));
+        assertEquals(1, count("budgets where currency = 'USD'"));
 
         long expenses = count("expenses");
         long transfers = count("transfers");
@@ -52,7 +57,7 @@ class DemoDataRichTest {
         assertEquals(expenses, count("expenses"));
         assertEquals(transfers, count("transfers"));
         assertEquals(pots, count("pot_entries where kind = 'MANUAL'"));
-        assertEquals(7, count("budgets"));
+        assertEquals(8, count("budgets"));
         assertEquals(3, count("wish_items where name in ('Fone de ouvido', 'Cadeira ergonômica', 'Bicicleta')"));
     }
 }

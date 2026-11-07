@@ -40,17 +40,17 @@ public class WishController {
 
     @GetMapping
     public List<WishResponse> getAll() {
-        return service.findAll().stream().map(WishResponse::fromEntity).toList();
+        return service.findAll().stream().map(this::toResponse).toList();
     }
 
     @PostMapping
     public ResponseEntity<WishResponse> create(@Valid @RequestBody WishRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(WishResponse.fromEntity(service.create(request.toDraft())));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(service.create(request.toDraft())));
     }
 
     @PutMapping("/{id}")
     public WishResponse update(@PathVariable Long id, @Valid @RequestBody WishRequest request) {
-        return WishResponse.fromEntity(service.update(id, request.toDraft()));
+        return toResponse(service.update(id, request.toDraft()));
     }
 
     @DeleteMapping("/{id}")
@@ -62,19 +62,23 @@ public class WishController {
     /** Records the real price and the account, creating the expense. */
     @PostMapping("/{id}/buy")
     public WishResponse buy(@PathVariable Long id, @Valid @RequestBody BuyRequest request) {
-        return WishResponse.fromEntity(service.buy(id, new WishService.Purchase(request.price(), request.date(),
+        return toResponse(service.buy(id, new WishService.Purchase(request.price(), request.date(),
                 request.accountId(), request.paymentMethodId(), request.categoryId(), Boolean.TRUE.equals(request.usePot()),
                 request.installments() == null ? 1 : request.installments())));
     }
 
     @PostMapping("/{id}/discard")
     public WishResponse discard(@PathVariable Long id) {
-        return WishResponse.fromEntity(service.discard(id));
+        return toResponse(service.discard(id));
     }
 
     @PostMapping("/{id}/restore")
     public WishResponse restore(@PathVariable Long id) {
-        return WishResponse.fromEntity(service.restore(id));
+        return toResponse(service.restore(id));
+    }
+
+    private WishResponse toResponse(WishItem item) {
+        return WishResponse.fromEntity(item, service.currencyOf(item));
     }
 
     public record WishRequest(
@@ -83,10 +87,11 @@ public class WishController {
             @DecimalMax(value = "999999999.99", message = "O preço é alto demais.") BigDecimal estimatedPrice,
             @Size(max = 255, message = "A observação pode ter até 255 caracteres.") String notes,
             @Size(max = 500, message = "O link pode ter até 500 caracteres.") String url,
-            Long potId) {
+            Long potId,
+            @Size(max = 3, message = "Moeda inválida.") String currency) {
 
         WishService.Draft toDraft() {
-            return new WishService.Draft(name, estimatedPrice, notes, url, potId);
+            return new WishService.Draft(name, estimatedPrice, notes, url, potId, currency);
         }
     }
 
@@ -105,13 +110,13 @@ public class WishController {
 
     public record WishResponse(Long id, String name, BigDecimal estimatedPrice, String notes, String url,
                                WishStatus status, Long potId, String potName, BigDecimal realPrice,
-                               LocalDate purchaseDate, Long expenseId, LocalDate createdAt) {
-        static WishResponse fromEntity(WishItem w) {
+                               LocalDate purchaseDate, Long expenseId, LocalDate createdAt, String currency) {
+        static WishResponse fromEntity(WishItem w, String currency) {
             return new WishResponse(w.getId(), w.getName(), w.getEstimatedPrice(), w.getNotes(), w.getUrl(), w.getStatus(),
                     w.getPot() == null ? null : w.getPot().getId(),
                     w.getPot() == null ? null : w.getPot().getName(),
                     w.getRealPrice(), w.getPurchaseDate(),
-                    w.getExpense() == null ? null : w.getExpense().getId(), w.getCreatedAt());
+                    w.getExpense() == null ? null : w.getExpense().getId(), w.getCreatedAt(), currency);
         }
     }
 }

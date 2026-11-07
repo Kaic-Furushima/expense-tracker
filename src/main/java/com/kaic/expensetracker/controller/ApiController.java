@@ -63,8 +63,9 @@ public class ApiController {
 
     @GetMapping("/summary")
     public SummaryService.MonthSummary summary(@RequestParam(required = false) YearMonth month,
-                                               @RequestParam(required = false) Long accountId) {
-        return summaryService.summarize(month == null ? YearMonth.now() : month, accountId);
+                                               @RequestParam(required = false) Long accountId,
+                                               @RequestParam(required = false) String currency) {
+        return summaryService.summarize(month == null ? YearMonth.now() : month, accountId, currency);
     }
 
     /** Every transaction and transfer, oldest first. Amounts are plain numbers (no currency symbol). */
@@ -85,7 +86,10 @@ public class ApiController {
                     cell(e.getPaymentMethod() == null ? "" : e.getPaymentMethod().getName()),
                     e.isPaid() ? "PAGO" : "A_PAGAR",
                     cell(e.getTags().stream().map(Tag::getName).sorted().collect(Collectors.joining(" "))),
-                    cell(e.getDescription()))));
+                    cell(e.getDescription()),
+                    cell(currencyOf(e.getAccount())),
+                    "",
+                    "")));
         }
         for (Transfer t : transferService.findAll()) {
             lines.add(new Line(t.getDate(), t.getId(), String.join(";",
@@ -99,16 +103,27 @@ public class ApiController {
                     "",
                     "PAGO",
                     "",
-                    "")));
+                    "",
+                    cell(currencyOf(t.getFromAccount())),
+                    t.getToAmount() == null ? "" : t.getToAmount().toPlainString(),
+                    cell(currencyOf(t.getToAccount())))));
         }
         lines.sort(Comparator.comparing(Line::date).thenComparingLong(Line::order));
 
-        StringBuilder csv = new StringBuilder("﻿data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao\n");
+        StringBuilder csv = new StringBuilder("﻿data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao;moeda;valor_destino;moeda_destino\n");
         lines.forEach(line -> csv.append(line.text()).append('\n'));
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"lancamentos.csv\"")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
                 .body(csv.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The account's currency for the CSV: its own, or the main one. */
+    private String currencyOf(com.kaic.expensetracker.model.Account account) {
+        if (account == null) {
+            return settingsService.currency();
+        }
+        return account.getCurrency() == null ? settingsService.currency() : account.getCurrency();
     }
 
     @GetMapping("/settings")
@@ -161,8 +176,9 @@ public class ApiController {
     @GetMapping("/upcoming")
     public UpcomingService.Upcoming upcoming(@RequestParam(required = false) LocalDate from,
                                              @RequestParam(required = false) LocalDate to,
-                                             @RequestParam(required = false) Long accountId) {
-        return upcomingService.compute(from, to, accountId);
+                                             @RequestParam(required = false) Long accountId,
+                                             @RequestParam(required = false) String currency) {
+        return upcomingService.compute(from, to, accountId, currency);
     }
 
     /** Things that deserve attention now (overdue and due-soon bills, budgets near the limit, end of month). */

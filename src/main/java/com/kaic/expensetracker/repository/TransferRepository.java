@@ -23,7 +23,7 @@ public interface TransferRepository extends JpaRepository<Transfer, Long> {
     List<Object[]> sumOutByAccount();
 
     /** Rows of {account id, total} for the money that entered each account. */
-    @Query("select t.toAccount.id, sum(t.amount) from Transfer t group by t.toAccount.id")
+    @Query("select t.toAccount.id, sum(coalesce(t.toAmount, t.amount)) from Transfer t group by t.toAccount.id")
     List<Object[]> sumInByAccount();
 
     @Query(value = "select count(*) from transfers where from_account_id = :accountId or to_account_id = :accountId",

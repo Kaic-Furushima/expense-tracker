@@ -115,7 +115,12 @@ export class Messages {
         return `${n} ${n === 1 ? 'dia' : 'dias'}`;
     }
 
-    money(value) {
-        return new Intl.NumberFormat(this.locale(), {style: 'currency', currency: this.settings.currency()}).format(value);
+    /** A value in a currency (default: the app's main one). */
+    money(value, currency = null) {
+        return new Intl.NumberFormat(this.locale(), {style: 'currency', currency: currency ?? this.settings.currency()}).format(value);
+    }
+
+    currency() {
+        return this.settings.currency();
     }
 }

@@ -73,11 +73,11 @@ async function showInvoice(account, list, index) {
             const parcel = t.installmentTotal ? ` · ${t.installmentNumber}/${t.installmentTotal}` : '';
             return `<div class="row static">${avatar(t.categoryIcon, t.categoryColor)}
                 <span class="grow"><span class="title">${esc(t.name)}</span><span class="small muted">${isoToBr(t.date)} · ${esc(txCategoryLabel(t))}${parcel}</span></span>
-                <span class="amount ${income ? 'income' : 'expense'}">${income ? '−' : ''}${money(t.amount)}</span></div>`;
+                <span class="amount ${income ? 'income' : 'expense'}">${income ? '−' : ''}${money(t.amount, account.currency)}</span></div>`;
         }).join('');
         const payments = invoice.payments.map(p => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('transfer')}</span>
             <span class="grow"><span class="title">Pagamento</span><span class="small muted">${isoToBr(p.date)} · de ${esc(p.fromAccountName)}</span></span>
-            <span class="amount income">${money(p.amount)}</span></div>`).join('');
+            <span class="amount income">${money(p.toAmount != null ? p.toAmount : p.amount, account.currency)}</span></div>`).join('');
         const remaining = Number(invoice.remaining);
         const sheet = openSheet(`
             <h2>${esc(account.name)}</h2>
@@ -88,9 +88,9 @@ async function showInvoice(account, list, index) {
                 <button type="button" class="back-btn" id="inv-newer" aria-label="Próxima fatura" ${newer ? '' : 'disabled'}>${ico('chevron-right')}</button>
             </div>
             <div class="card">
-                <div style="font-size:1.6rem;font-weight:800">${money(invoice.total)}</div>
+                <div style="font-size:1.6rem;font-weight:800">${money(invoice.total, account.currency)}</div>
                 <div class="small muted">Compras de ${isoToBr(invoice.startDate)} a ${isoToBr(invoice.closingDate)} · vence em ${isoToBr(invoice.dueDate)}</div>
-                ${Number(invoice.paid) > 0 ? `<div class="small" style="margin-top:6px">Pago: <strong>${money(invoice.paid)}</strong>${remaining > 0 ? ` · falta <strong class="expense">${money(remaining)}</strong>` : ''}</div>` : ''}
+                ${Number(invoice.paid) > 0 ? `<div class="small" style="margin-top:6px">Pago: <strong>${money(invoice.paid, account.currency)}</strong>${remaining > 0 ? ` · falta <strong class="expense">${money(remaining)}</strong>` : ''}</div>` : ''}
             </div>
             ${remaining > 0 ? '<button type="button" class="btn primary block" id="inv-pay">Pagar fatura</button>' : ''}
             ${items ? `<h3 class="section-title">Compras</h3><div class="list">${items}</div>` : '<div class="card empty">Nenhuma compra nesta fatura.</div>'}
@@ -115,11 +115,23 @@ function openInvoicePayment(account, list, index, invoice) {
         <form id="pay-form" novalidate>
             <input class="amount-input" id="p-amount" inputmode="decimal" autocomplete="off" value="${fmtInput(invoice.remaining)}" aria-label="Valor">
             <div class="field"><label for="p-from">Pagar com a conta</label><select id="p-from">${orderedAccounts(sources).map(a => `<option value="${a.id}" ${a.id === defaultFromAccount(sources) ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
+            <div class="field" id="p-fromamount-field" hidden><label for="p-fromamount" id="p-fromamount-label">Valor que saiu</label>
+                <input id="p-fromamount" inputmode="numeric" placeholder="0,00" autocomplete="off"></div>
             ${dateField('p-date', todayIso(), 'Data do pagamento')}
             ${tip('invoice-pay', `Pagar a fatura transfere dinheiro da conta para o cartão, sem duplicar despesas. Você pode pagar parcialmente.`)}
             <div class="form-actions"><button type="button" class="btn" id="p-back">Voltar</button><button type="submit" class="btn primary">Pagar</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'p-date');
+    bindAmountInput($('#p-fromamount', sheet));
+    // paying from an account in another currency: the invoice value reaches the card, the person says how much left the account
+    const paintFromAmount = () => {
+        const source = accountById(Number($('#p-from', sheet).value));
+        const different = !!source && (source.currency || currencyCode()) !== (account.currency || currencyCode());
+        $('#p-fromamount-field', sheet).hidden = !different;
+        if (different) $('#p-fromamount-label', sheet).textContent = T(`Valor que saiu (${currencySymbol(source.currency)})`);
+    };
+    $('#p-from', sheet).addEventListener('change', paintFromAmount);
+    paintFromAmount();
     $('#p-back', sheet).onclick = () => showInvoice(account, list, index);
     $('#pay-form', sheet).onsubmit = e => {
         e.preventDefault();
@@ -128,8 +140,10 @@ function openInvoicePayment(account, list, index, invoice) {
         if (!dateValue()) return toast('Informe uma data válida.');
         const from = Number($('#p-from', sheet).value);
         if (!from) return toast('Escolha a conta que vai pagar.');
+        const fromAmount = $('#p-fromamount-field', sheet).hidden ? 0 : parseAmount($('#p-fromamount', sheet).value);
+        if (!$('#p-fromamount-field', sheet).hidden && !(fromAmount > 0)) return toast('Informe quanto saiu da conta de origem.');
         run(() => api(`/accounts/${account.id}/invoices/${invoice.month}/pay`, {method: 'POST',
-            body: {fromAccountId: from, amount, date: dateValue()}}), 'Fatura paga');
+            body: {fromAccountId: from, amount, date: dateValue(), ...(fromAmount ? {fromAmount} : {})}}), 'Fatura paga');
     };
 }
 

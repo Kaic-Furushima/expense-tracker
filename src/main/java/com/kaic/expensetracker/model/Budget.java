@@ -32,6 +32,10 @@ public class Budget extends SyncEntity {
     @Column(precision = 15, scale = 2)
     private BigDecimal amount;
 
+    /** ISO code of the limit's currency; null means the main one. The row in force decides the currency of the limit. */
+    @Column(length = 3)
+    private String currency;
+
     public YearMonth from() {
         return YearMonth.parse(fromMonth);
     }

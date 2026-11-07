@@ -131,7 +131,7 @@ export async function statementPdf(reports, d) {
     }
 
     const caption = text => paragraph(text, {font: bold, size: 12, spacingBefore: 14, spacingAfter: 4});
-    const money = reports.money.bind(reports);
+    const money = cents => reports.money(cents, d.currency);
 
     // titulo e periodo
     paragraph(title, {font: bold, size: 18, c: GREEN});

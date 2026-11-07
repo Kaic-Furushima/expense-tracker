@@ -38,10 +38,13 @@ public class SummaryService {
     private final BudgetService budgetService;
     private final CategoryService categoryService;
     private final SettingsService settings;
+    private final AccountService accountService;
     private final RecurringOccurrenceRepository occurrenceRepository;
 
     public SummaryService(ExpenseService expenseService, BudgetService budgetService, CategoryService categoryService,
-                          SettingsService settings, RecurringOccurrenceRepository occurrenceRepository) {
+                          SettingsService settings, AccountService accountService,
+                          RecurringOccurrenceRepository occurrenceRepository) {
+        this.accountService = accountService;
         this.expenseService = expenseService;
         this.budgetService = budgetService;
         this.categoryService = categoryService;
@@ -55,8 +58,21 @@ public class SummaryService {
 
     /** Same as {@link #summarize(YearMonth)} but only counting one account (null means all accounts). */
     public MonthSummary summarize(YearMonth month, Long accountId) {
+        return summarize(month, accountId, null);
+    }
+
+    /**
+     * Only what is in one currency counts: the currency of the account being viewed, the one asked for, or the main
+     * one. Budgets and totals never mix currencies.
+     */
+    public MonthSummary summarize(YearMonth month, Long accountId, String currency) {
         // One read covers every month the summary looks at: the month itself, the trend and the rollover carry.
-        List<ExpenseService.Bucket> totals = expenseService.totalsBetween(month.minusMonths(ROLLOVER_MAX_MONTHS), month);
+        Map<Long, String> currencies = accountService.accountCurrencies();
+        String view = accountId != null ? currencies.getOrDefault(accountId, accountService.mainCurrency())
+                : currency == null || currency.isBlank() ? accountService.mainCurrency() : currency.trim().toUpperCase();
+        List<ExpenseService.Bucket> totals = expenseService.totalsBetween(month.minusMonths(ROLLOVER_MAX_MONTHS), month).stream()
+                .filter(b -> view.equals(currencies.get(b.accountId())))
+                .toList();
         Map<YearMonth, MonthSpend> spend = spendByMonth(totals);
 
         List<ExpenseService.Bucket> scoped = totals.stream()
@@ -72,7 +88,8 @@ public class SummaryService {
         BigDecimal pendingIncome = amount(scoped, true, false);
         BigDecimal pendingExpense = amount(scoped, false, false);
         for (RecurringOccurrence o : occurrenceRepository.findByMonthOrderByDueDateAscIdAsc(month.toString())) {
-            boolean inScope = accountId == null || accountId.equals(o.getRecurring().getAccount().getId());
+            Long occurrenceAccount = o.getRecurring().getAccount().getId();
+            boolean inScope = accountId == null ? view.equals(currencies.get(occurrenceAccount)) : accountId.equals(occurrenceAccount);
             if (o.getStatus() != OccurrenceStatus.PENDING || o.getAmount() == null || !inScope) {
                 continue;
             }
@@ -88,7 +105,7 @@ public class SummaryService {
         List<Category> allCategories = categoryService.findAll();
         Map<Long, Category> byId = new HashMap<>();
         allCategories.forEach(c -> byId.put(c.getId(), c));
-        BudgetService.Book book = budgetService.book();
+        BudgetService.Book book = budgetService.book(view);
         boolean rollover = settings.budgetRolloverFrom().isPresent();
         YearMonth rolloverFrom = settings.budgetRolloverFrom().orElse(month);
         Map<Long, List<Long>> childrenOf = new HashMap<>();
@@ -130,7 +147,7 @@ public class SummaryService {
 
         return new MonthSummary(month.toString(), income, spent, balance, previousSpent,
                 pendingIncome, pendingExpense, projected,
-                totalBudget, totalBase, totalCarry, monthSpend.total(), rollover, categories, trend, adjustment);
+                totalBudget, totalBase, totalCarry, monthSpend.total(), rollover, categories, trend, adjustment, view);
     }
 
     private CategoryTotal toCategoryTotal(Long categoryId, Tally tally, Map<Long, Category> byId,
@@ -269,6 +286,7 @@ public class SummaryService {
                                BigDecimal previousExpense, BigDecimal pendingIncome, BigDecimal pendingExpense,
                                BigDecimal projectedBalance, BigDecimal totalBudget, BigDecimal totalBudgetBase,
                                BigDecimal totalCarry, BigDecimal totalSpent, boolean budgetRollover,
-                               List<CategoryTotal> categories, List<MonthTotal> trend, BigDecimal adjustment) {
+                               List<CategoryTotal> categories, List<MonthTotal> trend, BigDecimal adjustment,
+                               String currency) {
     }
 }

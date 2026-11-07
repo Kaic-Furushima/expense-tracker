@@ -29,7 +29,7 @@ function paintProfileButton() {
 async function switchProfile(id) {
     try {
         await api(`/profiles/${id}/switch`, {method: 'POST'});
-        safeStorage.set('account', ''); // account ids belong to a profile
+        safeStorage.set('account', ''); safeStorage.set('currencyFilter', ''); // account ids belong to a profile
         location.reload();
     } catch (e) {
         toast(e.message);
@@ -100,7 +100,7 @@ function openProfileSheet(profile) {
                 toast('Nome salvo');
             } else {
                 await api('/profiles', {method: 'POST', body: {name}});
-                safeStorage.set('account', '');
+                safeStorage.set('account', ''); safeStorage.set('currencyFilter', '');
                 location.reload();
             }
         } catch (err) {
@@ -115,7 +115,7 @@ function openProfileSheet(profile) {
         if (!await confirmDialog(`Mover o perfil “${profile.name}” para a lixeira? Você pode restaurá-lo ou excluí-lo em Perfis › Lixeira.${sync}`, {okLabel: 'Mover para a lixeira', danger: false})) return;
         try {
             await api(`/profiles/${profile.id}`, {method: 'DELETE'});
-            safeStorage.set('account', '');
+            safeStorage.set('account', ''); safeStorage.set('currencyFilter', '');
             location.reload();
         } catch (err) {
             toast(err.message);

@@ -37,14 +37,14 @@ export function createApi(sqlDb, options = {}) {
     db.migrate();
     const settings = new Settings(db, options.languageStore ?? null);
     seed(db, settings.language());
-    const catalog = new Catalog(db);
+    const catalog = new Catalog(db, settings);
     const expenses = new Expenses(db, catalog);
     const budgets = new Budgets(db, catalog);
     const summary = new Summary(db, catalog, budgets, settings);
     const transfers = new Transfers(db, catalog);
     const invoices = new Invoices(db, catalog, expenses, transfers);
     const recurring = new Recurring(db, catalog, expenses, settings);
-    const pots = new Pots(db);
+    const pots = new Pots(db, catalog);
     const templates = new Templates(db, catalog);
     const attachments = new Attachments(db);
     const wishes = new Wishes(db, catalog, expenses, pots);
@@ -189,27 +189,27 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     r.delete('/trash', () => trash.empty());
 
     // orcamentos
-    r.get('/budgets', ({query}) => budgets.effectiveInMonth(budgets.monthParam(query.month, thisMonth(db))));
-    r.get('/budgets/total', ({query}) => budgets.total(budgets.monthParam(query.month, thisMonth(db))));
+    r.get('/budgets', ({query}) => budgets.effectiveInMonth(budgets.monthParam(query.month, thisMonth(db)), query.currency || null));
+    r.get('/budgets/total', ({query}) => budgets.total(budgets.monthParam(query.month, thisMonth(db)), query.currency || null));
     r.put('/budgets/total', ({query, body}) => {
         const month = budgets.monthParam(query.month, thisMonth(db));
-        budgets.set(null, month, body.amount, budgets.parseRequest(body));
-        return budgets.total(month);
+        budgets.set(null, month, body.amount, budgets.parseRequest(body), body.currency);
+        return budgets.total(month, '*');
     });
     r.delete('/budgets/total', ({query}) => budgets.remove(null, budgets.monthParam(query.month, thisMonth(db))));
     r.put('/budgets/:categoryId', ({params, query, body}) => {
         const month = budgets.monthParam(query.month, thisMonth(db));
         const id = Number(params.categoryId);
-        budgets.set(id, month, body.amount, budgets.parseRequest(body));
-        return budgets.effectiveInMonth(month).find(e => e.categoryId === id);
+        budgets.set(id, month, body.amount, budgets.parseRequest(body), body.currency);
+        return budgets.effectiveInMonth(month, '*').find(e => e.categoryId === id);
     });
     r.delete('/budgets/:categoryId', ({params, query}) =>
         budgets.remove(Number(params.categoryId), budgets.monthParam(query.month, thisMonth(db))));
 
     // painel e configuracoes
     r.get('/api/summary', ({query}) => summary.summarize(budgets.monthParam(query.month, thisMonth(db)),
-        query.accountId ? Number(query.accountId) : null));
-    r.get('/api/upcoming', ({query}) => upcoming.compute(query.from, query.to, query.accountId ? Number(query.accountId) : null));
+        query.accountId ? Number(query.accountId) : null, query.currency || null));
+    r.get('/api/upcoming', ({query}) => upcoming.compute(query.from, query.to, query.accountId ? Number(query.accountId) : null, query.currency || null));
     r.get('/api/settings', () => settings.snapshot());
     r.put('/api/settings', ({body}) => {
         const b = body ?? {};
@@ -228,7 +228,7 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     });
     r.post('/api/demo-data', () => { demo.load(); return noContent(); });
     r.delete('/api/data', () => { trash.trashEverything(); return noContent(); });
-    r.get('/api/export.csv', () => ({status: 200, text: exportCsv(db), contentType: 'text/csv;charset=UTF-8'}));
+    r.get('/api/export.csv', () => ({status: 200, text: exportCsv(db, settings.currency()), contentType: 'text/csv;charset=UTF-8'}));
     r.get('/api/reminders', () => reminders.current(db.clock));
     r.get('/api/about', () => ({version: APP_VERSION, dataFolder: 'dentro do aplicativo, neste aparelho', startupAvailable: false, startupEnabled: false}));
     r.post('/api/about/open-data-folder', () => { throw new HttpError(403, 'Os dados ficam dentro do aplicativo. Para tirar uma cópia, use o backup.'); });

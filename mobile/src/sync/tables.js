@@ -19,7 +19,7 @@ export const TABLES = {
     accounts: {
         columns: {
             name: 'text', type: 'text', color: 'text', icon: 'text', initial_cents: 'int', archived: 'int',
-            parent_id: 'fk:accounts', closing_day: 'int', due_day: 'int', saved: 'int'
+            parent_id: 'fk:accounts', closing_day: 'int', due_day: 'int', saved: 'int', currency: 'text'
         },
         natural: ['name']
     },
@@ -37,12 +37,12 @@ export const TABLES = {
         tags: true // tag_uuids: as etiquetas do lancamento
     },
     budgets: {
-        columns: {category_id: 'fk:categories', from_month: 'text', amount_cents: 'int'},
+        columns: {category_id: 'fk:categories', from_month: 'text', amount_cents: 'int', currency: 'text'},
         natural: ['category_id', 'from_month']
     },
     transfers: {
         columns: {
-            from_account_id: 'fk:accounts', to_account_id: 'fk:accounts', amount_cents: 'int', date: 'date',
+            from_account_id: 'fk:accounts', to_account_id: 'fk:accounts', amount_cents: 'int', to_amount_cents: 'int', date: 'date',
             description: 'text', invoice_month: 'text', created_at: 'ts', deleted_at: 'ts'
         }
     },
@@ -63,14 +63,14 @@ export const TABLES = {
     pots: {
         columns: {
             name: 'text', color: 'text', icon: 'text', goal_cents: 'int', mode: 'text', monthly_cents: 'int',
-            start_month: 'text', active: 'int', account_id: 'fk:accounts'
+            start_month: 'text', active: 'int', account_id: 'fk:accounts', currency: 'text'
         },
         natural: ['name']
     },
     wish_items: {
         columns: {
             name: 'text', estimated_cents: 'int', notes: 'text', url: 'text', status: 'text', pot_id: 'fk:pots',
-            real_cents: 'int', purchase_date: 'date', expense_id: 'fk:expenses', created_at: 'ts'
+            real_cents: 'int', purchase_date: 'date', expense_id: 'fk:expenses', created_at: 'ts', currency: 'text'
         }
     },
     pot_entries: {

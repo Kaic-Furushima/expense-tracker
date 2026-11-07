@@ -245,7 +245,8 @@ function openReportSheet() {
     const sheet = openSheet(`<h2>Relatório</h2>
         <p class="small muted sheet-sub">Relatório do período: resumo, despesas por categoria, lançamentos e transferências.</p>
         <div class="grid2">${dateField('r-from', from, 'De')}${dateField('r-to', to, 'Até')}</div>
-        <div class="field"><label for="r-account">Conta</label><select id="r-account"><option value="">Todas as contas</option>${orderedAccounts(activeAccounts()).map(a =>
+        <div class="field"><label for="r-account">Conta</label><select id="r-account"><option value="">Todas as contas</option>${[...new Set(activeAccounts().map(a => a.currency))].filter(code => code !== currencyCode()).map(code =>
+            `<option value="cur:${code}" ${!state.accountFilter && state.currencyFilter === code ? 'selected' : ''}>${esc(T('Contas em {}').replace('{}', code))}</option>`).join('')}${orderedAccounts(activeAccounts()).map(a =>
             `<option value="${a.id}" ${a.id === state.accountFilter ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
         <div class="form-actions"><button type="button" class="btn primary" id="r-pdf">${ico('download')} Baixar PDF</button><button type="button" class="btn" id="r-xlsx">${ico('download')} Baixar Excel</button></div>`);
     const readFrom = bindDate(sheet, 'r-from'), readTo = bindDate(sheet, 'r-to');
@@ -253,7 +254,8 @@ function openReportSheet() {
         if (!readFrom() || !readTo()) return toast('Informe as duas datas.');
         const params = new URLSearchParams({from: readFrom(), to: readTo()});
         const account = $('#r-account', sheet).value;
-        if (account) params.set('accountId', account);
+        if (account.startsWith('cur:')) params.set('currency', account.slice(4));
+        else if (account) params.set('accountId', account);
         try {
             const res = await busy(() => fetch(`/reports/statement.${format}?${params}`), 'Preparando o arquivo…');
             if (!res.ok) {
@@ -355,6 +357,7 @@ async function loadUpcoming() {
     const {from, to} = upcomingDates();
     const params = new URLSearchParams({from, to});
     if (state.accountFilter) params.set('accountId', state.accountFilter);
+    else if (state.currencyFilter) params.set('currency', state.currencyFilter);
     try { state.upcoming = await api(`/api/upcoming?${params}`); state.upcomingError = null; }
     catch (e) { state.upcoming = null; state.upcomingError = e.message; }
     paintUpcoming();
@@ -369,18 +372,18 @@ function paintUpcoming() {
         <div class="chips">${UPCOMING_RANGES.map(([v, l]) => `<button class="chip ${r.mode === v ? 'active' : ''}" data-range="${v}">${l}</button>`).join('')}</div>
         ${r.mode === 'custom' ? `<div class="grid2" style="margin-top:10px">${dateField('up-from', r.from || todayIso(), 'De')}${dateField('up-to', r.to || '', 'Até')}</div>` : ''}
         ${state.upcomingError ? `<div class="small expense" style="margin-top:8px">${esc(state.upcomingError)}</div>` : !u ? '<div class="skeleton" style="height:70px;margin-top:10px"></div>' : `
-        <div class="small muted" style="margin-top:8px">${isoToBr(u.from)} a ${isoToBr(u.to)}${state.accountFilter ? '' : ' · todas as contas (sem cartões e sub-contas)'}</div>
+        <div class="small muted" style="margin-top:8px">${isoToBr(u.from)} a ${isoToBr(u.to)}${state.accountFilter ? '' : ' · todas as contas (sem cartões e dinheiro guardado)'}</div>
         <div class="up-grid">
-            <div><span class="small muted">Vai entrar</span><strong class="income">+ ${money(u.incoming)}</strong></div>
-            <div><span class="small muted">Vai sair</span><strong class="expense">− ${money(u.outgoing)}</strong></div>
-            <div><span class="small muted">Vai ficar</span><strong class="${Number(u.endBalance) < 0 ? 'expense' : ''}">${money(u.endBalance)}</strong></div>
+            <div><span class="small muted">Vai entrar</span><strong class="income">+ ${money(u.incoming, u.currency)}</strong></div>
+            <div><span class="small muted">Vai sair</span><strong class="expense">− ${money(u.outgoing, u.currency)}</strong></div>
+            <div><span class="small muted">Vai ficar</span><strong class="${Number(u.endBalance) < 0 ? 'expense' : ''}">${money(u.endBalance, u.currency)}</strong></div>
         </div>
-        <div class="small muted">${Number(u.startBalance) === 0 && !u.items.length ? '' : `Saldo ${isoToBr(u.from) === isoToBr(todayIso()) ? 'hoje' : 'no início do período'}: ${money(u.startBalance)}`}${u.unknownAmounts ? ` · ${u.unknownAmounts} pagamento${u.unknownAmounts === 1 ? '' : 's'} de valor variável não ${u.unknownAmounts === 1 ? 'entrou' : 'entraram'} na conta` : ''}</div>
+        <div class="small muted">${Number(u.startBalance) === 0 && !u.items.length ? '' : `Saldo ${isoToBr(u.from) === isoToBr(todayIso()) ? 'hoje' : 'no início do período'}: ${money(u.startBalance, u.currency)}`}${u.unknownAmounts ? ` · ${u.unknownAmounts} pagamento${u.unknownAmounts === 1 ? '' : 's'} de valor variável não ${u.unknownAmounts === 1 ? 'entrou' : 'entraram'} na conta` : ''}</div>
         ${u.items.length ? `<button class="btn block" id="up-toggle" style="margin-top:10px">${open ? 'Esconder' : 'Ver'} ${u.items.length === 1 ? '1 item' : u.items.length + ' itens'}</button>` : '<div class="small muted" style="margin-top:8px">Nada a pagar ou receber neste período.</div>'}
         ${open ? `<div class="list" style="margin-top:10px">${u.items.map((it, i) => `<button class="row ${it.kind === 'OCCURRENCE' ? 'static' : ''}" data-up="${i}">
             <span class="avatar" style="background:var(--surface-2)">${ico(it.kind === 'INVOICE' ? 'credit-card' : it.kind === 'OCCURRENCE' ? 'repeat' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(it.name)}</span><span class="small ${it.overdue ? 'expense' : 'muted'}">${it.overdue ? 'Venceu em ' : ''}${isoToBr(it.date)} · ${esc(it.accountName)}</span></span>
-            <span class="amount ${it.type === 'INCOME' ? 'income' : 'expense'}">${it.amount == null ? 'a informar' : (it.type === 'INCOME' ? '+ ' : '− ') + money(it.amount)}</span></button>`).join('')}</div>` : ''}`}
+            <span class="amount ${it.type === 'INCOME' ? 'income' : 'expense'}">${it.amount == null ? 'a informar' : (it.type === 'INCOME' ? '+ ' : '− ') + money(it.amount, u.currency)}</span></button>`).join('')}</div>` : ''}`}
     </div>`;
     $$('[data-range]', box).forEach(b => b.onclick = () => {
         state.upcomingRange.mode = b.dataset.range;

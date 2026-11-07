@@ -9,23 +9,36 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
  * que a pessoa depositar. O dinheiro e uma reserva logica: continua na conta e o app so anota.
  */
 export class Pots {
-    constructor(db) {
+    constructor(db, catalog = null) {
         this.db = db;
+        this.catalog = catalog;
     }
+
+    mainCurrency() { return this.catalog ? this.catalog.mainCurrency() : 'BRL'; }
 
     currentMonth() { return isoDate(this.db.clock()).slice(0, 7); }
 
-    response(p) {
+    /** Ligada a uma conta marcada como "dinheiro guardado", a caixinha mostra o saldo dessa conta (nao tem saldo proprio). */
+    isMirrored(p) {
+        return p.account_id != null && !!p.account_saved;
+    }
+
+    response(p, balances = null) {
+        const mirrored = this.isMirrored(p);
+        const accountBalance = mirrored ? (balances ?? this.catalog.balances()).get(p.account_id) ?? 0 : null;
         return {
             id: p.id, name: p.name, color: p.color, icon: p.icon, goal: fromCents(p.goal_cents), mode: p.mode,
-            monthlyAmount: fromCents(p.monthly_cents), startMonth: p.start_month, active: !!p.active, balance: fromCents(p.balance_cents),
+            monthlyAmount: fromCents(p.monthly_cents), startMonth: p.start_month, active: !!p.active,
+            balance: fromCents(mirrored ? accountBalance : p.balance_cents), mirrored,
+            // com conta, vale a moeda dela; sem conta, a da propria caixinha (ou a principal)
+            currency: p.account_id != null ? (p.account_currency ?? this.mainCurrency()) : (p.currency ?? this.mainCurrency()),
             accountId: p.account_id ?? null, accountName: p.account_name ?? null
         };
     }
 
     select(where = '', params = []) {
         return this.db.all(`select p.*, coalesce((select sum(e.amount_cents) from pot_entries e where e.pot_id = p.id), 0) balance_cents,
-                                   a.name account_name
+                                   a.name account_name, a.currency account_currency, a.saved account_saved
                             from pots p left join accounts a on a.id = p.account_id ${where}`, params);
     }
 
@@ -42,15 +55,16 @@ export class Pots {
     /** Lista as caixinhas, depois de somar o aporte automatico que ja venceu. */
     list() {
         this.sync();
-        return this.select('order by p.name collate nocase').map(p => this.response(p));
+        const balances = this.catalog ? this.catalog.balances() : null;
+        return this.select('order by p.name collate nocase').map(p => this.response(p, balances));
     }
 
     create(body) {
         return this.db.tx(() => {
             const f = this.validate(body, null);
-            const {lastId} = this.db.run(`insert into pots (uuid, name, color, icon, goal_cents, mode, monthly_cents, start_month, active, account_id, updated_at)
-                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [this.db.newId(), f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.start, f.active, f.accountId, this.db.now()]);
+            const {lastId} = this.db.run(`insert into pots (uuid, name, color, icon, goal_cents, mode, monthly_cents, start_month, active, account_id, currency, updated_at)
+                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [this.db.newId(), f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.start, f.active, f.accountId, f.currency, this.db.now()]);
             this.sync();
             return this.response(this.row(lastId));
         });
@@ -61,8 +75,8 @@ export class Pots {
         return this.db.tx(() => {
             const current = this.row(id);
             const f = this.validate(body, current);
-            this.db.run('update pots set name = ?, color = ?, icon = ?, goal_cents = ?, mode = ?, monthly_cents = ?, active = ?, account_id = ?, updated_at = ? where id = ?',
-                [f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.active, f.accountId, this.db.now(), id]);
+            this.db.run('update pots set name = ?, color = ?, icon = ?, goal_cents = ?, mode = ?, monthly_cents = ?, active = ?, account_id = ?, currency = ?, updated_at = ? where id = ?',
+                [f.name, f.color, f.icon, f.goalCents, f.mode, f.monthlyCents, f.active, f.accountId, f.currency, this.db.now(), id]);
             this.sync();
             return this.response(this.row(id));
         });
@@ -100,9 +114,14 @@ export class Pots {
         return {cents: toCents(amount), date: body.date, note: body.note};
     }
 
+    /** O saldo de uma caixinha ligada a uma conta guardada e o da conta: para mexer nele, transfere-se dinheiro. */
+    requireOwnBalance(pot) {
+        if (this.isMirrored(pot)) throw conflict(`O saldo desta caixinha vem da conta “${pot.account_name}”. Para guardar ou tirar dinheiro, faça uma transferência.`);
+    }
+
     deposit(potId, body) {
         return this.db.tx(() => {
-            this.row(potId);
+            this.requireOwnBalance(this.row(potId));
             const m = this.moveRequest(body ?? {});
             return this.entryResponse(this.addEntry(potId, m.cents, m.date, 'MANUAL', m.note));
         });
@@ -110,7 +129,7 @@ export class Pots {
 
     withdraw(potId, body) {
         return this.db.tx(() => {
-            this.row(potId);
+            this.requireOwnBalance(this.row(potId));
             const m = this.moveRequest(body ?? {});
             if (this.balanceOf(potId) < m.cents) throw badRequest('Saldo da caixinha insuficiente.');
             return this.entryResponse(this.addEntry(potId, -m.cents, m.date, 'WITHDRAWAL', m.note));
@@ -127,6 +146,7 @@ export class Pots {
 
     /** Usado pela lista de desejos quando um item e pago com a caixinha. */
     recordPurchase(potId, cents, date, note, wishItemId) {
+        this.requireOwnBalance(this.row(potId));
         if (this.balanceOf(potId) < cents) throw badRequest('Saldo da caixinha insuficiente.');
         return this.addEntry(potId, -cents, date, 'PURCHASE', note, null, wishItemId);
     }
@@ -135,7 +155,9 @@ export class Pots {
     sync() {
         this.db.tx(() => {
             const now = this.currentMonth();
-            for (const pot of this.db.all("select * from pots where active = 1 and mode = 'FIXED' and monthly_cents > 0")) {
+            // a caixinha ligada a uma conta guardada mostra o saldo da conta: nao tem aporte automatico proprio
+            for (const pot of this.db.all(`select * from pots where active = 1 and mode = 'FIXED' and monthly_cents > 0
+                                           and not exists (select 1 from accounts a where a.id = pots.account_id and a.saved = 1)`)) {
                 const existing = new Set(this.db.all('select auto_month m from pot_entries where pot_id = ? and auto_month is not null', [pot.id]).map(r => r.m));
                 for (let m = pot.start_month; m <= now; m = addMonths(m, 1)) {
                     if (!existing.has(m)) this.addEntry(pot.id, pot.monthly_cents, `${m}-01`, 'AUTO', 'Aporte mensal', m);
@@ -174,8 +196,10 @@ export class Pots {
         if (body.startMonth && !isYearMonth(body.startMonth)) throw badRequest(`Mês inválido: ${body.startMonth} (use aaaa-mm).`);
         const accountId = body.accountId ?? null;
         if (accountId != null && !this.db.get('select 1 from accounts where id = ?', [accountId])) throw badRequest(`Conta não encontrada: ${accountId}`);
+        // com conta, a moeda e a dela; sem conta, a escolhida (nao enviada = continua como estava)
+        const currency = accountId != null ? null : body.currency === undefined ? current?.currency ?? null : this.catalog.storedCurrency(body.currency);
         return {
-            name, accountId,
+            name, accountId, currency,
             color: body.color && HEX_COLOR.test(body.color) ? body.color : '#81C784',
             icon: body.icon && String(body.icon).trim() ? String(body.icon).trim() : null,
             goalCents: goal == null ? null : toCents(goal),

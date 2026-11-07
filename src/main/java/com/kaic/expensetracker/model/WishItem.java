@@ -29,6 +29,10 @@ public class WishItem extends SyncEntity {
     @Column(name = "estimated_price", precision = 15, scale = 2)
     private BigDecimal estimatedPrice;
 
+    /** ISO code of the item's currency; null means the main one. */
+    @Column(length = 3)
+    private String currency;
+
     private String notes;
 
     @Column(length = 500)

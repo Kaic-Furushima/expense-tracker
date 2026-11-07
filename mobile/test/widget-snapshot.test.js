@@ -94,3 +94,13 @@ describe('resumo dos widgets', () => {
         assert.equal(s.texts.blocked, 'App locked by password. Widgets disabled.');
     });
 });
+
+describe('widgets com contas em outra moeda', () => {
+    it('o total soma so a moeda principal e cada conta mostra o saldo na moeda dela', () => {
+        ok('POST', '/accounts', {name: 'Wise', currency: 'USD', initialBalance: 50});
+        const s = snapshot();
+        assert.equal(norm(s.balances[0].main), 'R$ 1.000,00');
+        const wise = s.balances.find(b => b.name === 'Wise');
+        assert.equal(norm(wise.main), 'US$ 50,00');
+    });
+});

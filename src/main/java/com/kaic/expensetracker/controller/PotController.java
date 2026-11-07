@@ -81,7 +81,7 @@ public class PotController {
     }
 
     private PotResponse toResponse(Pot pot) {
-        return PotResponse.fromEntity(pot, service.balanceOf(pot));
+        return PotResponse.fromEntity(pot, service.balanceOf(pot), service.currencyOf(pot), service.isMirrored(pot));
     }
 
     public record PotRequest(
@@ -93,10 +93,11 @@ public class PotController {
             @DecimalMax(value = "999999999.99", message = "O aporte é alto demais.") BigDecimal monthlyAmount,
             String startMonth,
             Boolean active,
-            Long accountId) {
+            Long accountId,
+            @Size(max = 3, message = "Moeda inválida.") String currency) {
 
         PotService.Draft toDraft() {
-            return new PotService.Draft(name, color, icon, goal, mode, monthlyAmount, startMonth, active == null || active, accountId);
+            return new PotService.Draft(name, color, icon, goal, mode, monthlyAmount, startMonth, active == null || active, accountId, currency);
         }
     }
 
@@ -110,12 +111,12 @@ public class PotController {
 
     public record PotResponse(Long id, String name, String color, String icon, BigDecimal goal, PotMode mode,
                               BigDecimal monthlyAmount, String startMonth, boolean active, BigDecimal balance,
-                              Long accountId, String accountName) {
-        static PotResponse fromEntity(Pot p, BigDecimal balance) {
+                              Long accountId, String accountName, String currency, boolean mirrored) {
+        static PotResponse fromEntity(Pot p, BigDecimal balance, String currency, boolean mirrored) {
             return new PotResponse(p.getId(), p.getName(), p.getColor(), p.getIcon(), p.getGoal(), p.getMode(),
                     p.getMonthlyAmount(), p.getStartMonth(), p.isActive(), balance,
                     p.getAccount() == null ? null : p.getAccount().getId(),
-                    p.getAccount() == null ? null : p.getAccount().getName());
+                    p.getAccount() == null ? null : p.getAccount().getName(), currency, mirrored);
         }
     }
 

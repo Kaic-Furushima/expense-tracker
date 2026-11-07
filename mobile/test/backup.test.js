@@ -253,9 +253,9 @@ describe('exportar CSV', () => {
         assert.equal(res.status, 200);
         assert.match(res.contentType, /^text\/csv/);
         const lines = res.text.split('\n');
-        assert.equal(lines[0], '﻿data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao');
-        assert.equal(lines[1], '2026-05-01;EXPENSE;"Luz ""forte""";;100.00;"Carteira";;;A_PAGAR;"";');
-        assert.equal(lines[2], `2026-05-02;EXPENSE;"'=SOMA(A1)";"Mercado";12.50;"Conta principal";;;PAGO;"a b";"linha 1 linha 2"`);
+        assert.equal(lines[0], '﻿data;tipo;nome;categoria;valor;conta;conta_destino;forma_pagamento;situacao;tags;descricao;moeda;valor_destino;moeda_destino');
+        assert.equal(lines[1], '2026-05-01;EXPENSE;"Luz ""forte""";;100.00;"Carteira";;;A_PAGAR;"";;"BRL";;');
+        assert.equal(lines[2], `2026-05-02;EXPENSE;"'=SOMA(A1)";"Mercado";12.50;"Conta principal";;;PAGO;"a b";"linha 1 linha 2";"BRL";;`);
     });
 });
 

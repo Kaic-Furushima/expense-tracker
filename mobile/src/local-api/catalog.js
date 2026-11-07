@@ -1,5 +1,6 @@
 import {badRequest, conflict, invalid, notFound} from './http.js';
 import {fromCents, isoDate, toCents} from './util.js';
+import {CURRENCIES} from './settings.js';
 
 const ADJUSTMENT_NAME = 'Correção de saldo';
 
@@ -14,8 +15,28 @@ const requireText = (value, field, message, max, tooLong) => {
 
 /** Categorias, formas de pagamento, contas e tags: os cadastros que os lancamentos referenciam. */
 export class Catalog {
-    constructor(db) {
+    constructor(db, settings = null) {
         this.db = db;
+        this.settings = settings;
+    }
+
+    /** A moeda principal do app: a das contas que nao escolheram outra. */
+    mainCurrency() {
+        return this.settings ? this.settings.currency() : 'BRL';
+    }
+
+    /** A moeda de cada conta (id -> codigo): a propria ou, sem uma, a principal. Os totais so juntam contas da mesma moeda. */
+    accountCurrencies() {
+        const main = this.mainCurrency();
+        return new Map(this.db.all('select id, currency from accounts').map(a => [a.id, a.currency ?? main]));
+    }
+
+    /** Valida uma moeda pedida. Devolve o codigo, ou nulo para a moeda principal (que acompanha a configuracao). */
+    storedCurrency(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const code = String(value).trim().toUpperCase();
+        if (!CURRENCIES.includes(code)) throw badRequest('Moeda não suportada.');
+        return code === this.mainCurrency() ? null : code;
     }
 
     // ---- categorias ----
@@ -184,7 +205,8 @@ export class Catalog {
             id: row.id, name: row.name, type: row.type, color: row.color, icon: row.icon,
             initialBalance: fromCents(row.initial_cents), archived: !!row.archived,
             parentId: row.parent_id, parentName: parentName ?? null,
-            balance: fromCents(balanceCents), closingDay: row.closing_day, dueDay: row.due_day, saved: !!row.saved
+            balance: fromCents(balanceCents), closingDay: row.closing_day, dueDay: row.due_day, saved: !!row.saved,
+            currency: row.currency ?? this.mainCurrency()
         };
     }
 
@@ -202,7 +224,7 @@ export class Catalog {
                                      where deleted_at is null and status = 'PAID' group by account_id, type`)) {
             add(r.account_id, r.type === 'INCOME' ? r.total : -r.total);
         }
-        for (const r of this.db.all('select to_account_id id, sum(amount_cents) total from transfers where deleted_at is null group by to_account_id')) add(r.id, r.total);
+        for (const r of this.db.all('select to_account_id id, sum(coalesce(to_amount_cents, amount_cents)) total from transfers where deleted_at is null group by to_account_id')) add(r.id, r.total);
         for (const r of this.db.all('select from_account_id id, sum(amount_cents) total from transfers where deleted_at is null group by from_account_id')) add(r.id, -r.total);
         return result;
     }
@@ -228,10 +250,10 @@ export class Catalog {
     createAccount(body) {
         const fields = this.accountFields(body, null);
         if (this.db.get('select 1 from accounts where name = ?', [fields.name])) throw conflict('Já existe uma conta com esse nome.');
-        const {lastId} = this.db.run(`insert into accounts (uuid, name, type, color, icon, initial_cents, archived, parent_id, closing_day, due_day, saved, updated_at)
-                                      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        const {lastId} = this.db.run(`insert into accounts (uuid, name, type, color, icon, initial_cents, archived, parent_id, closing_day, due_day, saved, currency, updated_at)
+                                      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [this.db.newId(), fields.name, fields.type, fields.color, fields.icon, fields.initialCents, fields.archived ? 1 : 0,
-                fields.parentId, fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, this.db.now()]);
+                fields.parentId, fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, fields.currency, this.db.now()]);
         return this.accountWithBalance(lastId);
     }
 
@@ -246,9 +268,9 @@ export class Catalog {
             if (current.parent_id == null && this.activeTopLevelCount() <= 1) throw conflict('Mantenha pelo menos uma conta ativa.');
         }
         this.db.run(`update accounts set name = ?, type = ?, color = ?, icon = ?, initial_cents = ?, archived = ?, parent_id = ?,
-                     closing_day = ?, due_day = ?, saved = ?, updated_at = ? where id = ?`,
+                     closing_day = ?, due_day = ?, saved = ?, currency = ?, updated_at = ? where id = ?`,
             [fields.name, fields.type, fields.color, fields.icon, fields.initialCents, fields.archived ? 1 : 0, fields.parentId,
-                fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, this.db.now(), id]);
+                fields.closingDay, fields.dueDay, fields.saved ? 1 : 0, fields.currency, this.db.now(), id]);
         return this.accountWithBalance(id);
     }
 
@@ -313,12 +335,19 @@ export class Catalog {
             archived: body.archived === true,
             // nao enviado (cliente antigo): a conta continua como estava
             saved: body.saved === undefined || body.saved === null ? !!current?.saved : body.saved === true,
+            // nao enviada (cliente antigo): fica como estava; a moeda principal e guardada como "nula" (acompanha a principal)
+            currency: this.accountCurrency(body.currency, current),
             parentId: this.resolveParent('accounts', 'Conta', current, body.parentId,
                 'Uma conta não pode ficar dentro dela mesma.', 'Só é possível ficar dentro de uma conta principal (um nível).',
                 'Esta conta já tem partes; não pode ficar dentro de outra.'),
             closingDay: card ? day(body.closingDay, 'fechamento') : null,
             dueDay: card ? day(body.dueDay, 'vencimento') : null
         };
+    }
+
+    accountCurrency(value, current) {
+        if (value === undefined) return current?.currency ?? null;
+        return this.storedCurrency(value);
     }
 
     // ---- tags ----

@@ -47,7 +47,16 @@ public class WishService {
         this.categoryService = categoryService;
     }
 
-    public record Draft(String name, BigDecimal estimatedPrice, String notes, String url, Long potId) {
+    public record Draft(String name, BigDecimal estimatedPrice, String notes, String url, Long potId, String currency) {
+
+        public Draft(String name, BigDecimal estimatedPrice, String notes, String url, Long potId) {
+            this(name, estimatedPrice, notes, url, potId, null);
+        }
+    }
+
+    /** The item's currency: its own, or the main one. */
+    public String currencyOf(WishItem item) {
+        return item.getCurrency() == null ? accountService.mainCurrency() : item.getCurrency();
     }
 
     /** What is needed to turn a wish into a purchase. */
@@ -125,6 +134,9 @@ public class WishService {
         }
         BigDecimal price = purchase.price().setScale(2, RoundingMode.HALF_UP);
         LocalDate date = purchase.date() == null ? LocalDate.now(clock) : purchase.date();
+        if (!accountService.currencyOf(accountService.getOrThrow(purchase.accountId())).equals(currencyOf(item))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A conta precisa estar na mesma moeda do item.");
+        }
 
         Expense expense = new Expense();
         expense.setName(item.getName());
@@ -161,7 +173,20 @@ public class WishService {
         item.setEstimatedPrice(d.estimatedPrice() == null ? null : d.estimatedPrice().setScale(2, RoundingMode.HALF_UP));
         item.setNotes(d.notes() == null || d.notes().isBlank() ? null : d.notes().trim());
         item.setUrl(d.url() == null || d.url().isBlank() ? null : d.url().trim());
+        if (d.currency() != null) {
+            String code = d.currency().trim().toUpperCase();
+            if (code.isEmpty() || code.equals(accountService.mainCurrency())) {
+                item.setCurrency(null);
+            } else if (SettingsService.CURRENCIES.contains(code)) {
+                item.setCurrency(code);
+            } else {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Moeda não suportada.");
+            }
+        }
         item.setPot(d.potId() == null ? null : potService.getOrThrow(d.potId()));
+        if (item.getPot() != null && !potService.currencyOf(item.getPot()).equals(currencyOf(item))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A caixinha precisa estar na mesma moeda do item.");
+        }
     }
 }
 

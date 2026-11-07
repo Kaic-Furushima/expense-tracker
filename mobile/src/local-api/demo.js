@@ -37,9 +37,12 @@ export class Demo {
             const nubank = this.account('Nubank', 'CHECKING', '#8E24AA', 800);
             // O investimento e uma parte da conta Nubank (a "caixinha"): o dinheiro que vai para la sai do saldo disponivel.
             const caixinha = this.account('Caixinha Nubank', 'INVESTMENT', '#43A047', 0);
-            if (caixinha.parentId == null) this.catalog.updateAccount(caixinha.id, {...caixinha, parentId: nubank.id});
+            // Fica marcada como "dinheiro guardado": nao entra no total, aparece pequeno embaixo dele.
+            if (caixinha.parentId == null) this.catalog.updateAccount(caixinha.id, {...caixinha, parentId: nubank.id, saved: true, currency: null});
             const carteira = this.account('Carteira', 'WALLET', '#FB8C00', 200);
             const cartao = this.account('Cartão Nubank', 'CREDIT_CARD', '#7B1FA2', 0, 25, 5);
+            // Uma conta em dolar: tem os proprios totais, graficos e orcamentos.
+            const wise = this.account('Wise', 'CHECKING', '#00B9A0', 1500, null, null, 'USD');
 
             const today = isoDate(this.db.clock());
             const now = today.slice(0, 7);
@@ -78,6 +81,11 @@ export class Demo {
                     this.add(m, day(16), 'EXPENSE', 'Hospedagem', 'Viagem', '980.00', cartao, 'Crédito', 'PAID', ['viagem']);
                     this.add(m, day(23), 'EXPENSE', 'Presente', 'Presentes', '180.00', cartao, 'Crédito', 'PAID', ['presente']);
                 }
+                this.add(m, day(7), 'INCOME', 'Freelance internacional', 'Freelance', `${420 + back * 15}.00`, wise, 'Transferência');
+                this.add(m, day(4), 'EXPENSE', 'Hospedagem de site', 'Assinaturas', '12.00', wise, 'Débito');
+                this.add(m, day(15), 'EXPENSE', 'Ferramenta de design', 'Software', '29.00', wise, 'Débito');
+                if (back % 2 === 0) this.add(m, day(22), 'EXPENSE', 'Livros', 'Educação', '34.90', wise, 'Débito');
+                if (back === 3) this.transfer(m, day(12), santander, wise, '2000.00', 'Envio para a Wise', '380.00');
                 if (back === 0) {
                     this.add(m, 28, 'EXPENSE', 'Conta de luz', 'Moradia', '142.30', santander, null, 'PENDING');
                     this.add(m, 27, 'INCOME', 'Freelance a receber', 'Freelance', '600.00', nubank, null, 'PENDING', ['trabalho']);
@@ -90,6 +98,7 @@ export class Demo {
                 ['Assinaturas', 120], ['Pets', 150]]) {
                 this.budgets.upsertRow(this.category(name), '2000-01', toCents(limit)); // vale para todos os meses
             }
+            this.budgets.upsertRow(this.category('Software'), '2000-01', toCents(50), 'USD');
 
             this.rule('Plano de saúde', 'EXPENSE', '389.90', false, 10, santander, 'Débito', 'Saúde');
             this.rule('Seguro do carro', 'EXPENSE', '210.00', false, 15, bradesco, 'Débito', 'Transporte');
@@ -105,10 +114,19 @@ export class Demo {
             this.pot('Reserva de emergência', '#43A047', 'landmark', '20000', 'FIXED', '300', addMonths(now, -5), santander);
             const equipamentos = this.pot('Equipamentos', '#FFB74D', 'phone', '3000', 'VARIABLE', null, null, null);
             if (equipamentos) this.deposit(equipamentos, addMonths(now, -1), 12, '600.00', null);
+            // Caixinha em dolar, sem conta ligada.
+            const viagemUsd = this.pot('Viagem internacional', '#4DB6AC', 'plane', '3000', 'VARIABLE', null, null, null, 'USD');
+            if (viagemUsd) {
+                this.deposit(viagemUsd, addMonths(now, -1), 10, '250.00', null);
+                this.deposit(viagemUsd, now, Math.min(2, todayDay), '150.00', null);
+            }
+            // Ligada a uma conta de dinheiro guardado: mostra o saldo dela.
+            this.pot('Reserva Nubank', '#43A047', 'landmark', '10000', 'VARIABLE', null, null, caixinha);
             const equipamentosId = this.db.value('select id from pots where name = ?', ['Equipamentos']);
             this.wish('Fone de ouvido', '450.00', 'Com cancelamento de ruído', null, equipamentosId);
             this.wish('Cadeira ergonômica', '1200.00', null, null, equipamentosId);
             this.wish('Bicicleta', '1800.00', null, 'https://exemplo.com/bicicleta', null);
+            this.wish('Kindle', '120.00', null, null, null, 'USD');
 
             this.template('Almoço', 'EXPENSE', '35.00', 'Alimentação', bradesco, 'Débito');
             this.template('Uber', 'EXPENSE', '25.00', 'Transporte', santander, 'Pix');
@@ -116,10 +134,10 @@ export class Demo {
         });
     }
 
-    account(name, type, color, initial, closingDay = null, dueDay = null) {
+    account(name, type, color, initial, closingDay = null, dueDay = null, currency = undefined) {
         const found = this.db.get('select id from accounts where name = ?', [name]);
         return found ? this.catalog.accountWithBalance(found.id)
-            : this.catalog.createAccount({name, type, color, initialBalance: initial, closingDay, dueDay});
+            : this.catalog.createAccount({name, type, color, initialBalance: initial, closingDay, dueDay, currency});
     }
 
     category(name, kind = 'EXPENSE') {
@@ -157,11 +175,12 @@ export class Demo {
         this.expenses.insertInstallments({...this.fields(date, 'EXPENSE', name, category, total, account, 'Crédito', 'PAID', []), installments: count});
     }
 
-    transfer(month, day, from, to, amount, description) {
+    /** toAmount: o valor que chegou, quando as duas contas sao de moedas diferentes. */
+    transfer(month, day, from, to, amount, description, toAmount = undefined) {
         const date = this.dateIn(month, day);
         if (this.db.get(`select 1 from transfers where deleted_at is null and from_account_id = ? and to_account_id = ? and date = ? and amount_cents = ?`,
             [from.id, to.id, date, toCents(amount)])) return;
-        this.transfers.create({fromAccountId: from.id, toAccountId: to.id, amount, date, description});
+        this.transfers.create({fromAccountId: from.id, toAccountId: to.id, amount, date, description, toAmount});
     }
 
     rule(name, type, amount, variableAmount, dayOfMonth, account, paymentMethod, category) {
@@ -174,11 +193,11 @@ export class Demo {
     }
 
     /** Cria a caixinha se nao existir; devolve o id so quando acabou de criar (para os aportes nao se repetirem). */
-    pot(name, color, icon, goal, mode, monthly, startMonth, account) {
+    pot(name, color, icon, goal, mode, monthly, startMonth, account, currency = undefined) {
         if (this.db.get('select 1 from pots where name = ?', [name])) return null;
         return this.pots.create({
             name, color, icon, goal: Number(goal), mode, monthlyAmount: monthly == null ? null : Number(monthly), startMonth, active: true,
-            accountId: account ? account.id : null
+            accountId: account ? account.id : null, currency
         }).id;
     }
 
@@ -186,9 +205,9 @@ export class Demo {
         this.pots.deposit(potId, {amount: Number(amount), date: this.dateIn(month, day), note});
     }
 
-    wish(name, price, notes, url, potId) {
+    wish(name, price, notes, url, potId, currency = undefined) {
         if (this.db.get('select 1 from wish_items where name = ?', [name])) return;
-        this.wishes.create({name, estimatedPrice: Number(price), notes, url, potId});
+        this.wishes.create({name, estimatedPrice: Number(price), notes, url, potId, currency});
     }
 
     template(name, type, amount, category, account, paymentMethod) {

@@ -333,5 +333,23 @@ const V6 = `
 alter table accounts add column saved integer default 0;
 update accounts set saved = 1 where parent_id is not null;`;
 
-export const MIGRATIONS = [V1, syncSchema(), V3, V4, V5, V6];
+/**
+ * Moeda por conta ("currency" nulo = a moeda principal do app) e, numa transferencia entre moedas diferentes, o valor
+ * que chegou na conta de destino ("to_amount_cents" nulo = o mesmo valor que saiu). Aceitam nulo de proposito
+ * (aparelhos com versao antiga do sync mandam linhas sem esses campos).
+ */
+const V7 = `
+alter table accounts add column currency text;
+alter table transfers add column to_amount_cents integer;`;
+
+/**
+ * Moeda em caixinhas, itens da lista de desejos e limites de orcamento (nulo = a moeda principal). Aceita nulo de proposito
+ * (aparelhos com versao antiga do sync mandam linhas sem o campo).
+ */
+const V8 = `
+alter table pots add column currency text;
+alter table wish_items add column currency text;
+alter table budgets add column currency text;`;
+
+export const MIGRATIONS = [V1, syncSchema(), V3, V4, V5, V6, V7, V8];
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -71,19 +71,20 @@ public class TransferController {
             @DecimalMin(value = "0.01", message = "O valor deve ser de pelo menos 0,01.")
             @DecimalMax(value = "999999999.99", message = "O valor é alto demais.") BigDecimal amount,
             LocalDate date,
-            @Size(max = 255, message = "A observação pode ter até 255 caracteres.") String description) {
+            @Size(max = 255, message = "A observação pode ter até 255 caracteres.") String description,
+            @DecimalMax(value = "999999999.99", message = "O valor é alto demais.") BigDecimal toAmount) {
 
         TransferService.Draft toDraft() {
-            return new TransferService.Draft(fromAccountId, toAccountId, amount, date, description);
+            return new TransferService.Draft(fromAccountId, toAccountId, amount, date, description, null, toAmount);
         }
     }
 
-    public record TransferResponse(Long id, LocalDate date, BigDecimal amount, String description,
+    public record TransferResponse(Long id, LocalDate date, BigDecimal amount, BigDecimal toAmount, String description,
                                    Long fromAccountId, String fromAccountName, String fromAccountColor,
                                    Long toAccountId, String toAccountName, String toAccountColor,
                                    LocalDateTime createdAt, LocalDateTime updatedAt) {
         public static TransferResponse fromEntity(Transfer t) {
-            return new TransferResponse(t.getId(), t.getDate(), t.getAmount(), t.getDescription(),
+            return new TransferResponse(t.getId(), t.getDate(), t.getAmount(), t.getToAmount(), t.getDescription(),
                     t.getFromAccount().getId(), t.getFromAccount().getName(), t.getFromAccount().getColor(),
                     t.getToAccount().getId(), t.getToAccount().getName(), t.getToAccount().getColor(),
                     t.getCreatedAt(), t.getUpdatedAt());

@@ -46,20 +46,29 @@ public class ImportService {
     public record Row(int line, String kind, LocalDate date, TransactionType type, String name, BigDecimal amount,
                       Long categoryId, String categoryName, String accountName, String toAccountName,
                       String methodName, ExpenseStatus status, List<String> tags, String description,
-                      boolean duplicate) {
+                      boolean duplicate, String currency, BigDecimal toAmount, String toCurrency) {
+
+        /** A row without currency information (bank files, and the app's own CSV from before the columns existed). */
+        public Row(int line, String kind, LocalDate date, TransactionType type, String name, BigDecimal amount,
+                   Long categoryId, String categoryName, String accountName, String toAccountName,
+                   String methodName, ExpenseStatus status, List<String> tags, String description, boolean duplicate) {
+            this(line, kind, date, type, name, amount, categoryId, categoryName, accountName, toAccountName,
+                    methodName, status, tags, description, duplicate, null, null, null);
+        }
+
         Row withSuggestion(Long id) {
             return new Row(line, kind, date, type, name, amount, id, categoryName, accountName, toAccountName,
-                    methodName, status, tags, description, duplicate);
+                    methodName, status, tags, description, duplicate, currency, toAmount, toCurrency);
         }
 
         Row withCategory(Long id, String name) {
             return new Row(line, kind, date, type, this.name, amount, id, name, accountName, toAccountName,
-                    methodName, status, tags, description, duplicate);
+                    methodName, status, tags, description, duplicate, currency, toAmount, toCurrency);
         }
 
         Row withDuplicate(boolean value) {
             return new Row(line, kind, date, type, name, amount, categoryId, categoryName, accountName, toAccountName,
-                    methodName, status, tags, description, value);
+                    methodName, status, tags, description, value, currency, toAmount, toCurrency);
         }
 
         public boolean kindIsTransfer() {
@@ -242,7 +251,7 @@ public class ImportService {
     private void saveTransaction(Row row, Long accountId, Map<String, Category> created) {
         validate(row);
         Account account = row.accountName() != null && !row.accountName().isBlank()
-                ? accountService.findOrCreate(row.accountName(), AccountType.CHECKING, null)
+                ? accountService.findOrCreate(row.accountName(), AccountType.CHECKING, null, row.currency())
                 : accountId == null ? accountService.defaultAccount() : accountService.getOrThrow(accountId);
         Category category = null;
         if (row.categoryId() != null) {
@@ -276,10 +285,10 @@ public class ImportService {
         if (row.accountName() == null || row.toAccountName() == null || row.accountName().isBlank() || row.toAccountName().isBlank()) {
             throw bad("a transferência precisa da conta de origem e da de destino.");
         }
-        Account from = accountService.findOrCreate(row.accountName(), AccountType.CHECKING, null);
-        Account to = accountService.findOrCreate(row.toAccountName(), AccountType.CHECKING, null);
+        Account from = accountService.findOrCreate(row.accountName(), AccountType.CHECKING, null, row.currency());
+        Account to = accountService.findOrCreate(row.toAccountName(), AccountType.CHECKING, null, row.toCurrency());
         transferService.create(new TransferService.Draft(from.getId(), to.getId(), row.amount(), row.date(), row.description() != null
-                ? row.description() : row.name()));
+                ? row.description() : row.name(), null, row.toAmount()));
     }
 
     private static void validate(Row row) {
@@ -372,7 +381,12 @@ public class ImportService {
                     kind.equals("INCOME") ? TransactionType.INCOME : TransactionType.EXPENSE,
                     cell(r, col, "nome"), amount.abs(), null, blankToNull(cell(r, col, "categoria")),
                     blankToNull(cell(r, col, "conta")), transfer ? blankToNull(cell(r, col, "conta_destino")) : null,
-                    blankToNull(cell(r, col, "forma_pagamento")), status, tags, blankToNull(cell(r, col, "descricao")), false));
+                    blankToNull(cell(r, col, "forma_pagamento")), status, tags, blankToNull(cell(r, col, "descricao")), false,
+                    // optional columns (older files do not have them): the account's currency and, on a transfer between
+                    // currencies, the amount that arrived and the destination's currency
+                    blankToNull(cell(r, col, "moeda")),
+                    transfer && parseAmount(cell(r, col, "valor_destino")) != null ? parseAmount(cell(r, col, "valor_destino")).abs() : null,
+                    transfer ? blankToNull(cell(r, col, "moeda_destino")) : null));
         }
         return rows;
     }

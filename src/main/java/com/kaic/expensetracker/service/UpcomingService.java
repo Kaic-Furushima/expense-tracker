@@ -42,7 +42,8 @@ public class UpcomingService {
     }
 
     public record Upcoming(LocalDate from, LocalDate to, BigDecimal startBalance, BigDecimal incoming,
-                           BigDecimal outgoing, BigDecimal endBalance, int unknownAmounts, List<Item> items) {
+                           BigDecimal outgoing, BigDecimal endBalance, int unknownAmounts, List<Item> items,
+                           String currency) {
     }
 
     private final ExpenseService expenseService;
@@ -71,6 +72,11 @@ public class UpcomingService {
      * balance is the balance expected at the end of the period.
      */
     public Upcoming compute(LocalDate from, LocalDate to, Long accountId) {
+        return compute(from, to, accountId, null);
+    }
+
+    /** Only what is in one currency counts: the one of the account being viewed, the one asked for, or the main one. */
+    public Upcoming compute(LocalDate from, LocalDate to, Long accountId, String currency) {
         LocalDate today = LocalDate.now(clock);
         LocalDate start = from == null ? today : from;
         LocalDate end = to == null ? start.plusMonths(1) : to;
@@ -136,7 +142,15 @@ public class UpcomingService {
             }
         }
 
-        BigDecimal startBalance = currentBalance(accounts, accountId);
+        Map<Long, String> currencies = accountService.accountCurrencies();
+        String view = accountId != null ? currencies.getOrDefault(accountId, accountService.mainCurrency())
+                : currency == null || currency.isBlank() ? accountService.mainCurrency() : currency.trim().toUpperCase();
+        if (accountId == null) { // other currencies are not mixed into the forecast
+            java.util.Set<String> keptNames = new java.util.HashSet<>();
+            accounts.values().stream().filter(a -> view.equals(currencies.get(a.getId()))).forEach(a -> keptNames.add(a.getName()));
+            all.removeIf(i -> !keptNames.contains(i.accountName()));
+        }
+        BigDecimal startBalance = currentBalance(accounts, accountId, currencies, view);
         List<Item> inPeriod = new ArrayList<>();
         for (Item item : all) {
             if (start.isAfter(today) && item.date().isBefore(start)) {
@@ -158,7 +172,7 @@ public class UpcomingService {
             }
         }
         return new Upcoming(start, end, startBalance, incoming, outgoing,
-                startBalance.add(incoming).subtract(outgoing), unknown, inPeriod);
+                startBalance.add(incoming).subtract(outgoing), unknown, inPeriod, view);
     }
 
     private static BigDecimal signed(Item item) {
@@ -173,12 +187,13 @@ public class UpcomingService {
     }
 
     /** Money available today: every active own account except credit cards (their debt shows up as invoices). */
-    private BigDecimal currentBalance(Map<Long, Account> accounts, Long accountId) {
+    private BigDecimal currentBalance(Map<Long, Account> accounts, Long accountId, Map<Long, String> currencies, String view) {
         Map<Long, BigDecimal> balances = accountService.balances();
         BigDecimal total = BigDecimal.ZERO;
         for (Account a : accounts.values()) {
             boolean counts = accountId != null ? accountId.equals(a.getId())
-                    : !a.isArchived() && a.getParent() == null && a.getType() != AccountType.CREDIT_CARD;
+                    : !a.isArchived() && !Boolean.TRUE.equals(a.getSaved()) && a.getType() != AccountType.CREDIT_CARD
+                    && view.equals(currencies.get(a.getId()));
             if (counts) {
                 total = total.add(balances.getOrDefault(a.getId(), a.getInitialBalance()));
             }

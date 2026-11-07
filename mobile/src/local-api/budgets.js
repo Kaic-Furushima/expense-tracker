@@ -5,7 +5,10 @@ const MAX_AMOUNT = 999999999.99;
 
 /** Todas as linhas de orcamento em memoria, para responder "qual limite valia no mes X?" sem ir ao banco toda hora. */
 export class Book {
-    constructor(rows) {
+    /** view: a moeda que se esta olhando (so os limites dela valem); nulo = qualquer uma. main: a moeda principal. */
+    constructor(rows, view = null, main = 'BRL') {
+        this.view = view;
+        this.main = main;
         this.byCategory = new Map();
         this.total = [];
         [...rows].sort((a, b) => (a.from_month < b.from_month ? -1 : a.from_month > b.from_month ? 1 : 0)).forEach(row => {
@@ -26,7 +29,10 @@ export class Book {
             current = row;
         }
         if (!current || current.amount_cents == null) return null;
-        return {categoryId, amountCents: current.amount_cents, fromMonth: current.from_month};
+        // a linha em vigor decide tambem a moeda: um limite em dolar substitui o antigo em real, e nao aparece na visao em real
+        const currency = current.currency ?? this.main;
+        if (this.view != null && currency !== this.view) return null;
+        return {categoryId, amountCents: current.amount_cents, fromMonth: current.from_month, currency};
     }
 
     base(categoryId, month) {
@@ -49,30 +55,34 @@ export class Budgets {
         this.catalog = catalog;
     }
 
-    book() {
-        return new Book(this.db.all('select * from budgets'));
+    /** Os limites da moeda olhada (a principal, se nao disser); com "*", os de todas as moedas. */
+    book(currency = null) {
+        const view = currency === '*' ? null : this.catalog.storedCurrency(currency) ?? this.catalog.mainCurrency();
+        return new Book(this.db.all('select * from budgets'), view, this.catalog.mainCurrency());
     }
 
-    effectiveInMonth(month) {
-        const book = this.book();
+    effectiveInMonth(month, currency = null) {
+        const book = this.book(currency);
         return book.categoryIds().map(id => book.effective(id, month)).filter(Boolean)
-            .map(e => ({categoryId: e.categoryId, amount: fromCents(e.amountCents), fromMonth: e.fromMonth}));
+            .map(e => ({categoryId: e.categoryId, amount: fromCents(e.amountCents), fromMonth: e.fromMonth, currency: e.currency}));
     }
 
-    total(month) {
-        const e = this.book().effective(null, month);
-        return {amount: e ? fromCents(e.amountCents) : null, fromMonth: e ? e.fromMonth : null};
+    total(month, currency = null) {
+        const e = this.book(currency).effective(null, month);
+        return {amount: e ? fromCents(e.amountCents) : null, fromMonth: e ? e.fromMonth : null, currency: e ? e.currency : null};
     }
 
-    set(categoryId, month, amount, scope) {
+    /** currency: a moeda do limite (nao enviada = continua a do limite em vigor, ou a principal). */
+    set(categoryId, month, amount, scope, currency) {
         const cents = this.normalize(amount);
         if (categoryId != null) this.catalog.category(categoryId);
         this.db.tx(() => {
-            const before = this.book().base(categoryId, month);
-            this.upsertRow(categoryId, month, cents);
+            const before = this.book('*').effective(categoryId, month);
+            const stored = currency === undefined ? this.catalog.storedCurrency(before?.currency) : this.catalog.storedCurrency(currency);
+            this.upsertRow(categoryId, month, cents, stored);
             if (scope === 'ONLY_MONTH') {
                 const next = addMonths(month, 1);
-                if (!this.findRow(categoryId, next)) this.upsertRow(categoryId, next, before);
+                if (!this.findRow(categoryId, next)) this.upsertRow(categoryId, next, before ? before.amountCents : null, this.catalog.storedCurrency(before?.currency));
             }
         });
     }
@@ -80,7 +90,7 @@ export class Budgets {
     /** A partir deste mes nao ha limite (os meses anteriores mantem o deles). */
     remove(categoryId, month) {
         if (categoryId != null) this.catalog.category(categoryId);
-        this.upsertRow(categoryId, month, null);
+        this.upsertRow(categoryId, month, null, null);
     }
 
     /** Valida o pedido de um limite ({amount, scope}) e devolve o escopo. */
@@ -102,11 +112,11 @@ export class Budgets {
         return this.db.get('select * from budgets where category_id is ? and from_month = ?', [categoryId, month]);
     }
 
-    upsertRow(categoryId, month, cents) {
+    upsertRow(categoryId, month, cents, currency = null) {
         const row = this.findRow(categoryId, month);
-        if (row) this.db.run('update budgets set amount_cents = ?, updated_at = ? where id = ?', [cents, this.db.now(), row.id]);
-        else this.db.run('insert into budgets (uuid, category_id, from_month, amount_cents, updated_at) values (?, ?, ?, ?, ?)',
-            [this.db.newId(), categoryId, month, cents, this.db.now()]);
+        if (row) this.db.run('update budgets set amount_cents = ?, currency = ?, updated_at = ? where id = ?', [cents, currency, this.db.now(), row.id]);
+        else this.db.run('insert into budgets (uuid, category_id, from_month, amount_cents, currency, updated_at) values (?, ?, ?, ?, ?, ?)',
+            [this.db.newId(), categoryId, month, cents, currency, this.db.now()]);
     }
 
     normalize(amount) {

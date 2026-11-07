@@ -57,6 +57,10 @@ public class Account extends SyncEntity {
     @Column
     private Boolean saved = false;
 
+    /** ISO code of the account's currency; null means the app's main currency (it follows the setting). */
+    @Column(length = 3)
+    private String currency;
+
     /** Archived accounts keep their history but are not offered for new transactions. */
     @Column(nullable = false)
     private boolean archived;

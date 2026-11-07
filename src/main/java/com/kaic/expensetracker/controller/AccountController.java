@@ -43,7 +43,7 @@ public class AccountController {
     public List<AccountResponse> getAll() {
         Map<Long, BigDecimal> balances = accountService.balances();
         return accountService.findAll().stream()
-                .map(a -> AccountResponse.fromEntity(a, balances.getOrDefault(a.getId(), a.getInitialBalance())))
+                .map(a -> AccountResponse.fromEntity(a, balances.getOrDefault(a.getId(), a.getInitialBalance()), accountService.currencyOf(a)))
                 .toList();
     }
 
@@ -78,7 +78,7 @@ public class AccountController {
 
     private AccountResponse withBalance(Account account) {
         return AccountResponse.fromEntity(account,
-                accountService.balances().getOrDefault(account.getId(), account.getInitialBalance()));
+                accountService.balances().getOrDefault(account.getId(), account.getInitialBalance()), accountService.currencyOf(account));
     }
 
     public record AccountRequest(
@@ -92,23 +92,25 @@ public class AccountController {
             Boolean archived,
             Integer closingDay,
             Integer dueDay,
-            Boolean saved) {
+            Boolean saved,
+            @Size(max = 3, message = "Moeda inválida.") String currency) {
 
         AccountService.Draft toDraft() {
             return new AccountService.Draft(name, type, color, icon, initialBalance, parentId, Boolean.TRUE.equals(archived),
-                    closingDay, dueDay, saved);
+                    closingDay, dueDay, saved, currency);
         }
     }
 
     public record AccountResponse(Long id, String name, AccountType type, String color, String icon,
                                   BigDecimal initialBalance, boolean archived, Long parentId, String parentName,
-                                  BigDecimal balance, Integer closingDay, Integer dueDay, boolean saved) {
-        public static AccountResponse fromEntity(Account a, BigDecimal balance) {
+                                  BigDecimal balance, Integer closingDay, Integer dueDay, boolean saved,
+                                  String currency) {
+        public static AccountResponse fromEntity(Account a, BigDecimal balance, String currency) {
             Account parent = a.getParent();
             return new AccountResponse(a.getId(), a.getName(), a.getType(), a.getColor(), a.getIcon(),
                     a.getInitialBalance(), a.isArchived(), parent == null ? null : parent.getId(),
                     parent == null ? null : parent.getName(), balance,
-                    a.getClosingDay(), a.getDueDay(), Boolean.TRUE.equals(a.getSaved()));
+                    a.getClosingDay(), a.getDueDay(), Boolean.TRUE.equals(a.getSaved()), currency);
         }
     }
 }

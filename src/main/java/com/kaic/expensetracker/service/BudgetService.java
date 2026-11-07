@@ -40,15 +40,20 @@ public class BudgetService {
     }
 
     /** The limit in force in a month and the month it started to apply. */
-    public record Effective(Long categoryId, BigDecimal amount, String fromMonth) {
+    public record Effective(Long categoryId, BigDecimal amount, String fromMonth, String currency) {
     }
 
     /** All budget rows in memory, to answer "what limit applied in month X?" many times without hitting the database. */
     public static final class Book {
         private final Map<Long, List<Budget>> byCategory = new HashMap<>();
         private final List<Budget> total = new ArrayList<>();
+        /** The currency being looked at (only its limits count); null means any currency. */
+        private final String view;
+        private final String main;
 
-        Book(List<Budget> rows) {
+        Book(List<Budget> rows, String view, String main) {
+            this.view = view;
+            this.main = main;
             rows.stream().sorted((a, b) -> a.getFromMonth().compareTo(b.getFromMonth())).forEach(row -> {
                 if (row.getCategory() == null) {
                     total.add(row);
@@ -71,7 +76,12 @@ public class BudgetService {
             if (current == null || current.getAmount() == null) {
                 return Optional.empty();
             }
-            return Optional.of(new Effective(categoryId, current.getAmount(), current.getFromMonth()));
+            // the row in force decides the currency too: a limit in dollars replaces the old one in reais
+            String currency = current.getCurrency() == null ? main : current.getCurrency();
+            if (view != null && !currency.equals(view)) {
+                return Optional.empty();
+            }
+            return Optional.of(new Effective(categoryId, current.getAmount(), current.getFromMonth(), currency));
         }
 
         public Optional<BigDecimal> base(Long categoryId, YearMonth month) {
@@ -85,14 +95,36 @@ public class BudgetService {
 
     private final BudgetRepository budgetRepository;
     private final CategoryService categoryService;
+    private final SettingsService settings;
 
-    public BudgetService(BudgetRepository budgetRepository, CategoryService categoryService) {
+    public BudgetService(BudgetRepository budgetRepository, CategoryService categoryService, SettingsService settings) {
         this.budgetRepository = budgetRepository;
         this.categoryService = categoryService;
+        this.settings = settings;
     }
 
+    /** The limits of the main currency. */
     public Book book() {
-        return new Book(budgetRepository.findAll());
+        return book(null);
+    }
+
+    /** The limits of a currency (the main one when none is given); "*" means every currency. */
+    public Book book(String currency) {
+        String main = settings.currency();
+        String view = "*".equals(currency) ? null : currency == null || currency.isBlank() ? main : currency.trim().toUpperCase();
+        return new Book(budgetRepository.findAll(), view, main);
+    }
+
+    /** The code to store: null for the main currency (it follows the setting), an error for an unknown one. */
+    private String storedCurrency(String code) {
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        String upper = code.trim().toUpperCase();
+        if (!SettingsService.CURRENCIES.contains(upper)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Moeda não suportada.");
+        }
+        return upper.equals(settings.currency()) ? null : upper;
     }
 
     public List<Budget> findAll() {
@@ -101,7 +133,11 @@ public class BudgetService {
 
     /** Limits of every category in force in a month (categories without one are absent). */
     public List<Effective> effectiveInMonth(YearMonth month) {
-        Book book = book();
+        return effectiveInMonth(month, null);
+    }
+
+    public List<Effective> effectiveInMonth(YearMonth month, String currency) {
+        Book book = book(currency);
         return book.categoryIds().stream()
                 .map(id -> book.effective(id, month))
                 .flatMap(Optional::stream)
@@ -109,20 +145,31 @@ public class BudgetService {
     }
 
     public Optional<Effective> effectiveTotal(YearMonth month) {
-        return book().effective(null, month);
+        return effectiveTotal(month, null);
+    }
+
+    public Optional<Effective> effectiveTotal(YearMonth month, String currency) {
+        return book(currency).effective(null, month);
     }
 
     /** Sets the limit of a category (null category = overall limit) from a month on, or only for that month. */
     @Transactional
     public void set(Long categoryId, YearMonth month, BigDecimal amount, Scope scope) {
+        set(categoryId, month, amount, scope, null);
+    }
+
+    /** currency: the limit's currency (null = not sent: keeps the one of the limit in force, or the main one). */
+    @Transactional
+    public void set(Long categoryId, YearMonth month, BigDecimal amount, Scope scope, String currency) {
         BigDecimal value = normalize(amount);
         Category category = categoryId == null ? null : categoryService.getOrThrow(categoryId);
-        Optional<BigDecimal> before = book().base(categoryId, month);
-        upsertRow(category, month.toString(), value);
+        Optional<Effective> before = book("*").effective(categoryId, month);
+        String beforeCurrency = before.map(Effective::currency).orElse(null);
+        upsertRow(category, month.toString(), value, storedCurrency(currency != null ? currency : beforeCurrency));
         if (scope == Scope.ONLY_MONTH) {
             String next = month.plusMonths(1).toString();
             if (findRow(category, next).isEmpty()) {
-                upsertRow(category, next, before.orElse(null));
+                upsertRow(category, next, before.map(Effective::amount).orElse(null), storedCurrency(beforeCurrency));
             }
         }
     }
@@ -131,17 +178,24 @@ public class BudgetService {
     @Transactional
     public void remove(Long categoryId, YearMonth month) {
         Category category = categoryId == null ? null : categoryService.getOrThrow(categoryId);
-        upsertRow(category, month.toString(), null);
+        upsertRow(category, month.toString(), null, null);
     }
 
     /** A limit that applies to every month (used by the sample data). */
     @Transactional
     public Budget upsert(Long categoryId, BigDecimal amount) {
         Category category = categoryService.getOrThrow(categoryId);
-        return upsertRow(category, ALWAYS, normalize(amount));
+        return upsertRow(category, ALWAYS, normalize(amount), null);
     }
 
-    private Budget upsertRow(Category category, String fromMonth, BigDecimal amount) {
+    /** A limit that applies to every month, in a given currency (used by the sample data). */
+    @Transactional
+    public Budget upsert(Long categoryId, BigDecimal amount, String currency) {
+        Category category = categoryService.getOrThrow(categoryId);
+        return upsertRow(category, ALWAYS, normalize(amount), storedCurrency(currency));
+    }
+
+    private Budget upsertRow(Category category, String fromMonth, BigDecimal amount, String currency) {
         Budget row = findRow(category, fromMonth).orElseGet(() -> {
             Budget b = new Budget();
             b.setCategory(category);
@@ -149,6 +203,7 @@ public class BudgetService {
             return b;
         });
         row.setAmount(amount);
+        row.setCurrency(currency);
         return budgetRepository.save(row);
     }
 

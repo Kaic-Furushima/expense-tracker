@@ -1,5 +1,6 @@
 import {HttpError, badRequest} from './http.js';
 import {toCents} from './util.js';
+import {CURRENCIES} from './settings.js';
 
 export const MAX_ROWS = 5000;
 const MAX_AMOUNT = 999999999.99;
@@ -145,7 +146,8 @@ function isAppCsv(table) {
 function row(fields) {
     return {
         line: 0, kind: 'TRANSACTION', date: null, type: 'EXPENSE', name: null, amount: 0, categoryId: null, categoryName: null,
-        accountName: null, toAccountName: null, methodName: null, status: 'PAID', tags: [], description: null, duplicate: false, ...fields
+        accountName: null, toAccountName: null, methodName: null, status: 'PAID', tags: [], description: null, duplicate: false,
+        currency: null, toAmount: null, toCurrency: null, ...fields
     };
 }
 
@@ -171,7 +173,10 @@ function parseAppCsv(table) {
             accountName: blankToNull(cell(r, col, 'conta')), toAccountName: transfer ? blankToNull(cell(r, col, 'conta_destino')) : null,
             methodName: blankToNull(cell(r, col, 'forma_pagamento')),
             status: cell(r, col, 'situacao').toUpperCase() === 'A_PAGAR' ? 'PENDING' : 'PAID',
-            tags: tags.trim() ? tags.trim().split(/\s+/) : [], description: blankToNull(cell(r, col, 'descricao'))
+            tags: tags.trim() ? tags.trim().split(/\s+/) : [], description: blankToNull(cell(r, col, 'descricao')),
+            // colunas opcionais (arquivos antigos nao as tem): a moeda da conta e, numa transferencia entre moedas, o valor que chegou
+            currency: blankToNull(cell(r, col, 'moeda')), toCurrency: transfer ? blankToNull(cell(r, col, 'moeda_destino')) : null,
+            toAmount: transfer ? (v => (v == null ? null : Math.abs(v)))(parseAmount(cell(r, col, 'valor_destino'))) : null
         }));
     }
     return rows;
@@ -428,13 +433,17 @@ export class Importer {
     }
 
     /** A conta com esse nome (sem diferenciar maiusculas) ou uma nova, de conta corrente. */
-    accountByName(name) {
-        return this.db.get('select * from accounts where name = ?', [name.trim()]) ?? this.catalog.createAccount({name, type: 'CHECKING'});
+    accountByName(name, currency = null) {
+        const found = this.db.get('select * from accounts where name = ?', [name.trim()]);
+        if (found) return found;
+        // uma conta nova nasce na moeda do arquivo (se for uma que o app conhece)
+        const code = currency ? String(currency).trim().toUpperCase() : null;
+        return this.catalog.createAccount({name, type: 'CHECKING', ...(code && CURRENCIES.includes(code) ? {currency: code} : {})});
     }
 
     saveTransaction(r, accountId, created) {
         this.validate(r);
-        const account = r.accountName && r.accountName.trim() ? this.accountByName(r.accountName)
+        const account = r.accountName && r.accountName.trim() ? this.accountByName(r.accountName, r.currency)
             : accountId == null ? this.catalog.defaultAccount() : this.catalog.account(accountId);
         let categoryId = null;
         if (r.categoryId != null) {
@@ -463,8 +472,8 @@ export class Importer {
         if (!r.accountName || !r.toAccountName || !r.accountName.trim() || !r.toAccountName.trim()) {
             throw bad('a transferência precisa da conta de origem e da de destino.');
         }
-        const from = this.accountByName(r.accountName);
-        const to = this.accountByName(r.toAccountName);
-        this.transfers.create({fromAccountId: from.id, toAccountId: to.id, amount: r.amount, date: r.date, description: r.description ?? r.name});
+        const from = this.accountByName(r.accountName, r.currency);
+        const to = this.accountByName(r.toAccountName, r.toCurrency);
+        this.transfers.create({fromAccountId: from.id, toAccountId: to.id, amount: r.amount, toAmount: r.toAmount, date: r.date, description: r.description ?? r.name});
     }
 }

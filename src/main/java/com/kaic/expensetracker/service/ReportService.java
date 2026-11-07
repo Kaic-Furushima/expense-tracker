@@ -72,13 +72,18 @@ public class ReportService {
     /** What goes into a statement. Totals count only what is paid; the pending ones are listed apart. */
     public record Data(LocalDate from, LocalDate to, String accountName, List<Expense> expenses,
                        List<Transfer> transfers, BigDecimal income, BigDecimal expense, BigDecimal pendingIncome,
-                       BigDecimal pendingExpense, Map<String, BigDecimal> byCategory) {
+                       BigDecimal pendingExpense, Map<String, BigDecimal> byCategory, String currency) {
         BigDecimal balance() {
             return income.subtract(expense);
         }
     }
 
     public Data collect(LocalDate from, LocalDate to, Long accountId) {
+        return collect(from, to, accountId, null);
+    }
+
+    /** Only what is in one currency counts: the one of the account chosen, the one asked for, or the main one. */
+    public Data collect(LocalDate from, LocalDate to, Long accountId, String currency) {
         if (from == null || to == null || to.isBefore(from)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o período (a data final não pode ser antes da inicial).");
         }
@@ -86,15 +91,18 @@ public class ReportService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O relatório pode cobrir no máximo 5 anos.");
         }
         String accountName = accountId == null ? null : accountService.getOrThrow(accountId).getName();
+        Map<Long, String> currencies = accountService.accountCurrencies();
+        String view = accountId != null ? currencies.getOrDefault(accountId, accountService.mainCurrency())
+                : currency == null || currency.isBlank() ? accountService.mainCurrency() : currency.trim().toUpperCase();
         List<Expense> expenses = expenseService.findAll().stream()
                 .filter(e -> !e.getDate().isBefore(from) && !e.getDate().isAfter(to))
-                .filter(e -> accountId == null || accountId.equals(e.getAccount().getId()))
+                .filter(e -> accountId == null ? view.equals(currencies.get(e.getAccount().getId())) : accountId.equals(e.getAccount().getId()))
                 .sorted(Comparator.comparing(Expense::getDate).thenComparing(Expense::getId))
                 .toList();
         List<Transfer> transfers = transferService.findAll().stream()
                 .filter(t -> !t.getDate().isBefore(from) && !t.getDate().isAfter(to))
-                .filter(t -> accountId == null || accountId.equals(t.getFromAccount().getId())
-                        || accountId.equals(t.getToAccount().getId()))
+                .filter(t -> accountId == null ? view.equals(currencies.get(t.getFromAccount().getId())) && view.equals(currencies.get(t.getToAccount().getId()))
+                        : accountId.equals(t.getFromAccount().getId()) || accountId.equals(t.getToAccount().getId()))
                 .sorted(Comparator.comparing(Transfer::getDate).thenComparing(Transfer::getId))
                 .toList();
         BigDecimal income = sum(expenses, true, true), expense = sum(expenses, false, true);
@@ -105,7 +113,7 @@ public class ReportService {
                 .entrySet().stream().sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
                 .forEach(en -> byCategory.put(en.getKey(), en.getValue()));
         return new Data(from, to, accountName, expenses, transfers, income, expense,
-                sum(expenses, true, false), sum(expenses, false, false), byCategory);
+                sum(expenses, true, false), sum(expenses, false, false), byCategory, view);
     }
 
     private static BigDecimal sum(List<Expense> list, boolean income, boolean paid) {
@@ -136,9 +144,9 @@ public class ReportService {
         return String.format("%02d/%02d/%d", d.getDayOfMonth(), d.getMonthValue(), d.getYear());
     }
 
-    private String money(BigDecimal value) {
+    private String money(BigDecimal value, String currency) {
         NumberFormat f = NumberFormat.getCurrencyInstance(m.locale());
-        f.setCurrency(Currency.getInstance(settings.currency()));
+        f.setCurrency(Currency.getInstance(currency == null ? settings.currency() : currency));
         return f.format(value).replace(' ', ' ').replace(' ', ' ');
     }
 
@@ -176,13 +184,13 @@ public class ReportService {
 
             PdfPTable summary = new PdfPTable(new float[]{1, 1, 1});
             summary.setWidthPercentage(100);
-            summary.addCell(box(m.t("Receitas"), money(d.income()), new Color(0x2E, 0x7D, 0x32)));
-            summary.addCell(box(m.t("Despesas"), money(d.expense()), new Color(0xC6, 0x28, 0x28)));
-            summary.addCell(box(m.t("Saldo do período"), money(d.balance()), Color.BLACK));
+            summary.addCell(box(m.t("Receitas"), money(d.income(), d.currency()), new Color(0x2E, 0x7D, 0x32)));
+            summary.addCell(box(m.t("Despesas"), money(d.expense(), d.currency()), new Color(0xC6, 0x28, 0x28)));
+            summary.addCell(box(m.t("Saldo do período"), money(d.balance(), d.currency()), Color.BLACK));
             doc.add(summary);
             if (d.pendingIncome().signum() > 0 || d.pendingExpense().signum() > 0) {
                 Paragraph pending = new Paragraph(m.t("Ainda a pagar: {0} · ainda a receber: {1} (não entram nos totais acima)",
-                        money(d.pendingExpense()), money(d.pendingIncome())), small);
+                        money(d.pendingExpense(), d.currency()), money(d.pendingIncome(), d.currency())), small);
                 pending.setSpacingBefore(4);
                 doc.add(pending);
             }
@@ -198,7 +206,7 @@ public class ReportService {
                 header(cats, m.t("Categoria"), m.t("Total"), "%");
                 for (Map.Entry<String, BigDecimal> en : d.byCategory().entrySet()) {
                     cats.addCell(cell(en.getKey(), normal, Element.ALIGN_LEFT));
-                    cats.addCell(cell(money(en.getValue()), normal, Element.ALIGN_RIGHT));
+                    cats.addCell(cell(money(en.getValue(), d.currency()), normal, Element.ALIGN_RIGHT));
                     cats.addCell(cell(d.expense().signum() == 0 ? "" : en.getValue().multiply(BigDecimal.valueOf(100))
                             .divide(d.expense(), 0, java.math.RoundingMode.HALF_UP) + "%", normal, Element.ALIGN_RIGHT));
                 }
@@ -222,7 +230,7 @@ public class ReportService {
                     table.addCell(cell(name + (tagsOf(e).isEmpty() ? "" : "  " + tagsOf(e)), normal, Element.ALIGN_LEFT));
                     table.addCell(cell(categoryLabel(e.getCategory()), normal, Element.ALIGN_LEFT));
                     table.addCell(cell(e.getAccount().getName(), normal, Element.ALIGN_LEFT));
-                    PdfPCell value = cell((e.isIncome() ? "+ " : "− ") + money(e.getAmount()),
+                    PdfPCell value = cell((e.isIncome() ? "+ " : "− ") + money(e.getAmount(), d.currency()),
                             FontFactory.getFont(FontFactory.HELVETICA, 9, e.isIncome() ? new Color(0x2E, 0x7D, 0x32) : new Color(0xC6, 0x28, 0x28)),
                             Element.ALIGN_RIGHT);
                     table.addCell(value);
@@ -243,7 +251,7 @@ public class ReportService {
                     table.addCell(cell(br(t.getDate()), normal, Element.ALIGN_LEFT));
                     table.addCell(cell(t.getDescription() == null ? m.t("Transferência") : t.getDescription(), normal, Element.ALIGN_LEFT));
                     table.addCell(cell(t.getFromAccount().getName() + " → " + t.getToAccount().getName(), normal, Element.ALIGN_LEFT));
-                    table.addCell(cell(money(t.getAmount()), bold, Element.ALIGN_RIGHT));
+                    table.addCell(cell(money(t.getAmount(), d.currency()), bold, Element.ALIGN_RIGHT));
                 }
                 doc.add(table);
             }

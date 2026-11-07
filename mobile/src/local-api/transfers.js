@@ -15,7 +15,8 @@ export class Transfers {
 
     response(r) {
         return {
-            id: r.id, date: r.date, amount: fromCents(r.amount_cents), description: r.description,
+            id: r.id, date: r.date, amount: fromCents(r.amount_cents), toAmount: r.to_amount_cents == null ? null : fromCents(r.to_amount_cents),
+            description: r.description,
             fromAccountId: r.from_account_id, fromAccountName: r.from_name, fromAccountColor: r.from_color,
             toAccountId: r.to_account_id, toAccountName: r.to_name, toAccountColor: r.to_color,
             createdAt: r.created_at, updatedAt: r.updated_at
@@ -51,9 +52,9 @@ export class Transfers {
         return this.db.tx(() => {
             const f = this.validate(body, null);
             const now = this.db.now();
-            const {lastId} = this.db.run(`insert into transfers (uuid, from_account_id, to_account_id, amount_cents, date, description, invoice_month, created_at, updated_at)
-                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [this.db.newId(), f.fromId, f.toId, f.cents, f.date, f.description, invoiceMonth, now, now]);
+            const {lastId} = this.db.run(`insert into transfers (uuid, from_account_id, to_account_id, amount_cents, to_amount_cents, date, description, invoice_month, created_at, updated_at)
+                                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [this.db.newId(), f.fromId, f.toId, f.cents, f.toCents, f.date, f.description, invoiceMonth, now, now]);
             return this.response(this.row(lastId));
         });
     }
@@ -62,8 +63,8 @@ export class Transfers {
         return this.db.tx(() => {
             const current = this.row(id);
             const f = this.validate(body, current);
-            this.db.run('update transfers set from_account_id = ?, to_account_id = ?, amount_cents = ?, date = ?, description = ?, updated_at = ? where id = ?',
-                [f.fromId, f.toId, f.cents, f.date, f.description, this.db.now(), id]);
+            this.db.run('update transfers set from_account_id = ?, to_account_id = ?, amount_cents = ?, to_amount_cents = ?, date = ?, description = ?, updated_at = ? where id = ?',
+                [f.fromId, f.toId, f.cents, f.toCents, f.date, f.description, this.db.now(), id]);
             return this.response(this.row(id));
         });
     }
@@ -97,7 +98,17 @@ export class Transfers {
         this.requireUsable(from, current?.from_account_id);
         this.requireUsable(to, current?.to_account_id);
         const description = body.description && String(body.description).trim() ? String(body.description).trim() : null;
-        return {fromId: from.id, toId: to.id, cents: toCents(amount), date, description};
+        // entre moedas diferentes o valor que chegou e outro: a pessoa informa os dois lados (sem cotacao automatica)
+        const main = this.catalog.mainCurrency();
+        let toCentsValue = null;
+        if ((from.currency ?? main) !== (to.currency ?? main)) {
+            const received = body.toAmount == null || body.toAmount === '' ? null : Number(body.toAmount);
+            if (received == null || Number.isNaN(received)) throw invalid({toAmount: 'Informe o valor que chegou na conta de destino.'});
+            if (received < 0.01) throw invalid({toAmount: 'O valor deve ser de pelo menos 0,01.'});
+            if (received > MAX_AMOUNT) throw invalid({toAmount: 'O valor é alto demais.'});
+            toCentsValue = toCents(received);
+        }
+        return {fromId: from.id, toId: to.id, cents: toCents(amount), toCents: toCentsValue, date, description};
     }
 
     /** Conta arquivada nao recebe transferencias novas (uma antiga pode continuar apontando para ela). */

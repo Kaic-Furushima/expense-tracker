@@ -92,9 +92,15 @@ public class InvoiceService {
         return build(card, month, group(card).get(month), paymentsByMonth(accountId).get(month), true);
     }
 
-    /** Pays (all or part of) an invoice from another account, as a transfer into the card. */
+    /** Same as the other {@code pay}, for accounts in the same currency as the card. */
     @Transactional
     public Transfer pay(Long cardId, YearMonth month, Long fromAccountId, BigDecimal amount, LocalDate date) {
+        return pay(cardId, month, fromAccountId, amount, date, null);
+    }
+
+    /** Pays (all or part of) an invoice from another account, as a transfer into the card. */
+    @Transactional
+    public Transfer pay(Long cardId, YearMonth month, Long fromAccountId, BigDecimal amount, LocalDate date, BigDecimal fromAmount) {
         Account card = requireCard(cardId);
         Invoice invoice = build(card, month, group(card).get(month), paymentsByMonth(cardId).get(month), false);
         BigDecimal value = amount != null ? amount : invoice.remaining();
@@ -102,8 +108,13 @@ public class InvoiceService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta fatura não tem nada a pagar.");
         }
         String description = "Fatura " + card.getName() + " " + String.format("%02d/%d", month.getMonthValue(), month.getYear());
-        return transferService.create(new TransferService.Draft(fromAccountId, cardId, value,
-                date == null ? LocalDate.now(clock) : date, description, month.toString()));
+        // paying from an account in another currency: the person says how much left it (the invoice value is what reaches the card)
+        boolean sameCurrency = accountService.currencyOf(accountService.getOrThrow(fromAccountId)).equals(accountService.currencyOf(card));
+        if (!sameCurrency && fromAmount == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe quanto saiu da conta de origem.");
+        }
+        return transferService.create(new TransferService.Draft(fromAccountId, cardId, sameCurrency ? value : fromAmount,
+                date == null ? LocalDate.now(clock) : date, description, month.toString(), value));
     }
 
     private Invoice build(Account card, YearMonth month, List<Expense> expenses, List<Transfer> payments, boolean withItems) {
@@ -113,7 +124,8 @@ public class InvoiceService {
         for (Expense e : items) {
             total = total.add(e.isIncome() ? e.getAmount().negate() : e.getAmount());
         }
-        BigDecimal paid = paidList.stream().map(Transfer::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal paid = paidList.stream().map(t -> t.getToAmount() != null ? t.getToAmount() : t.getAmount())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal remaining = total.subtract(paid).max(BigDecimal.ZERO);
         LocalDate closing = closingDate(card, month);
         Status status = total.signum() > 0 && remaining.signum() == 0 ? Status.PAID

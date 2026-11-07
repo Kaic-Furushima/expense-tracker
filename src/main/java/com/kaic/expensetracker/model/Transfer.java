@@ -36,6 +36,10 @@ public class Transfer extends SyncEntity {
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal amount;
 
+    /** Between accounts of different currencies: what arrived in the destination account; null means the same amount. */
+    @Column(name = "to_amount", precision = 15, scale = 2)
+    private BigDecimal toAmount;
+
     @Column(nullable = false)
     private LocalDate date;
 

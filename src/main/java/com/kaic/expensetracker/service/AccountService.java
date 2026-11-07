@@ -34,12 +34,14 @@ public class AccountService {
     private final RecurringPaymentRepository recurringPaymentRepository;
     private final TransferRepository transferRepository;
     private final PotRepository potRepository;
+    private final SettingsService settings;
     private final Clock clock;
 
     public AccountService(AccountRepository accountRepository, ExpenseRepository expenseRepository,
                           RecurringPaymentRepository recurringPaymentRepository, TransferRepository transferRepository,
-                          PotRepository potRepository, Clock clock) {
+                          PotRepository potRepository, SettingsService settings, Clock clock) {
         this.clock = clock;
+        this.settings = settings;
         this.potRepository = potRepository;
         this.accountRepository = accountRepository;
         this.expenseRepository = expenseRepository;
@@ -49,17 +51,41 @@ public class AccountService {
 
     /** Fields of an account, as typed by the user. */
     public record Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
-                        Long parentId, boolean archived, Integer closingDay, Integer dueDay, Boolean saved) {
+                        Long parentId, boolean archived, Integer closingDay, Integer dueDay, Boolean saved,
+                        String currency) {
+
+        public Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
+                     Long parentId, boolean archived, Integer closingDay, Integer dueDay, Boolean saved) {
+            this(name, type, color, icon, initialBalance, parentId, archived, closingDay, dueDay, saved, null);
+        }
 
         public Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
                      Long parentId, boolean archived, Integer closingDay, Integer dueDay) {
-            this(name, type, color, icon, initialBalance, parentId, archived, closingDay, dueDay, null);
+            this(name, type, color, icon, initialBalance, parentId, archived, closingDay, dueDay, null, null);
         }
 
         public Draft(String name, AccountType type, String color, String icon, BigDecimal initialBalance,
                      Long parentId, boolean archived) {
-            this(name, type, color, icon, initialBalance, parentId, archived, null, null, null);
+            this(name, type, color, icon, initialBalance, parentId, archived, null, null, null, null);
         }
+    }
+
+    /** The account's currency: its own, or the app's main one when it has none. */
+    public String currencyOf(Account account) {
+        return account.getCurrency() == null ? settings.currency() : account.getCurrency();
+    }
+
+    /** The currency of every account (id to code): its own, or the main one. Totals only add up accounts of one currency. */
+    public Map<Long, String> accountCurrencies() {
+        String main = settings.currency();
+        Map<Long, String> result = new HashMap<>();
+        accountRepository.findAll().forEach(a -> result.put(a.getId(), a.getCurrency() == null ? main : a.getCurrency()));
+        return result;
+    }
+
+    /** The main currency of the app. */
+    public String mainCurrency() {
+        return settings.currency();
     }
 
     public List<Account> findAll() {
@@ -189,6 +215,14 @@ public class AccountService {
         return expenseRepository.save(entry);
     }
 
+    /** Like {@link #findOrCreate(String, AccountType, String)}; a new account is born in the given currency (if it is a known one). */
+    @Transactional
+    public Account findOrCreate(String name, AccountType type, String color, String currency) {
+        String code = currency == null ? null : currency.trim().toUpperCase();
+        return accountRepository.findByNameIgnoreCase(name.trim()).orElseGet(() -> create(new Draft(name, type, color, null,
+                BigDecimal.ZERO, null, false, null, null, null, code != null && SettingsService.CURRENCIES.contains(code) ? code : null)));
+    }
+
     @Transactional
     public Account findOrCreate(String name, AccountType type, String color) {
         return accountRepository.findByNameIgnoreCase(name.trim())
@@ -217,6 +251,17 @@ public class AccountService {
         account.setArchived(d.archived());
         // not sent (an old client): keep what the account already was
         if (d.saved() != null) account.setSaved(d.saved());
+        // not sent (an old client): keep the currency; the main currency is stored as "none" (it follows the setting)
+        if (d.currency() != null) {
+            String code = d.currency().trim().toUpperCase();
+            if (code.isEmpty() || code.equals(settings.currency())) {
+                account.setCurrency(null);
+            } else if (SettingsService.CURRENCIES.contains(code)) {
+                account.setCurrency(code);
+            } else {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Moeda não suportada.");
+            }
+        }
         boolean card = account.getType() == AccountType.CREDIT_CARD;
         account.setClosingDay(card ? requireDay(d.closingDay(), "fechamento") : null);
         account.setDueDay(card ? requireDay(d.dueDay(), "vencimento") : null);

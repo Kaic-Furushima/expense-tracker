@@ -1,4 +1,4 @@
-import {conflict, invalid, notFound} from './http.js';
+import {badRequest, conflict, invalid, notFound} from './http.js';
 import {fromCents, isIsoDate, isoDate, toCents} from './util.js';
 
 const MAX_AMOUNT = 999999999.99;
@@ -20,7 +20,7 @@ export class Wishes {
         return {
             id: w.id, name: w.name, estimatedPrice: fromCents(w.estimated_cents), notes: w.notes, url: w.url, status: w.status,
             potId: w.pot_id, potName: w.pot_name ?? null, realPrice: fromCents(w.real_cents), purchaseDate: w.purchase_date,
-            expenseId: w.expense_id, createdAt: w.created_at.slice(0, 10)
+            expenseId: w.expense_id, createdAt: w.created_at.slice(0, 10), currency: w.currency ?? this.catalog.mainCurrency()
         };
     }
 
@@ -41,19 +41,19 @@ export class Wishes {
     create(body) {
         return this.db.tx(() => {
             const f = this.validate(body);
-            const {lastId} = this.db.run(`insert into wish_items (uuid, name, estimated_cents, notes, url, status, pot_id, created_at, updated_at)
-                                          values (?, ?, ?, ?, ?, 'WISHED', ?, ?, ?)`,
-                [this.db.newId(), f.name, f.cents, f.notes, f.url, f.potId, isoDate(this.db.clock()), this.db.now()]);
+            const {lastId} = this.db.run(`insert into wish_items (uuid, name, estimated_cents, notes, url, status, pot_id, currency, created_at, updated_at)
+                                          values (?, ?, ?, ?, ?, 'WISHED', ?, ?, ?, ?)`,
+                [this.db.newId(), f.name, f.cents, f.notes, f.url, f.potId, f.currency, isoDate(this.db.clock()), this.db.now()]);
             return this.response(this.row(lastId));
         });
     }
 
     update(id, body) {
         return this.db.tx(() => {
-            this.row(id);
-            const f = this.validate(body);
-            this.db.run('update wish_items set name = ?, estimated_cents = ?, notes = ?, url = ?, pot_id = ?, updated_at = ? where id = ?',
-                [f.name, f.cents, f.notes, f.url, f.potId, this.db.now(), id]);
+            const current = this.row(id);
+            const f = this.validate(body, current);
+            this.db.run('update wish_items set name = ?, estimated_cents = ?, notes = ?, url = ?, pot_id = ?, currency = ?, updated_at = ? where id = ?',
+                [f.name, f.cents, f.notes, f.url, f.potId, f.currency, this.db.now(), id]);
             return this.response(this.row(id));
         });
     }
@@ -102,6 +102,8 @@ export class Wishes {
             const cents = toCents(price);
             const date = body.date || isoDate(this.db.clock());
             const account = this.catalog.account(body.accountId);
+            const main = this.catalog.mainCurrency();
+            if ((account.currency ?? main) !== (item.currency ?? main)) throw badRequest('A conta precisa estar na mesma moeda do item.');
             if (body.paymentMethodId != null) this.catalog.method(body.paymentMethodId);
             if (body.categoryId != null) this.catalog.category(body.categoryId);
             const fields = {
@@ -118,7 +120,7 @@ export class Wishes {
         });
     }
 
-    validate(body) {
+    validate(body, current = null) {
         const errors = {};
         const name = body.name == null ? '' : String(body.name).trim();
         if (!name) errors.name = 'Informe o nome do produto.';
@@ -129,8 +131,12 @@ export class Wishes {
         if (body.notes != null && String(body.notes).length > 255) errors.notes = 'A observação pode ter até 255 caracteres.';
         if (body.url != null && String(body.url).length > 500) errors.url = 'O link pode ter até 500 caracteres.';
         if (Object.keys(errors).length) throw invalid(errors);
-        if (body.potId != null) this.pots.row(body.potId);
+        const currency = body.currency === undefined ? current?.currency ?? null : this.catalog.storedCurrency(body.currency);
+        if (body.potId != null) {
+            const pot = this.pots.response(this.pots.row(body.potId));
+            if (pot.currency !== (currency ?? this.catalog.mainCurrency())) throw badRequest('A caixinha precisa estar na mesma moeda do item.');
+        }
         const text = v => (v == null || !String(v).trim() ? null : String(v).trim());
-        return {name, cents: price == null ? null : toCents(price), notes: text(body.notes), url: text(body.url), potId: body.potId ?? null};
+        return {name, cents: price == null ? null : toCents(price), notes: text(body.notes), url: text(body.url), potId: body.potId ?? null, currency};
     }
 }

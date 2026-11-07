@@ -14,11 +14,27 @@ const activeAccounts = () => state.accounts.filter(a => !a.archived);
 /** The main account: the oldest active one (the same the server uses when none is given). */
 const mainAccountId = () => activeAccounts().reduce((m, a) => (m == null || a.id < m ? a.id : m), null);
 const accountById = id => state.accounts.find(a => a.id === id);
+/** Per currency: what is available, what is saved (accounts marked as saved money) and whether any account is saved. */
+function accountTotalsByCurrency(list) {
+    const result = new Map();
+    for (const a of list) {
+        const code = a.currency || currencyCode();
+        const t = result.get(code) || {available: 0, saved: 0, hasSaved: false};
+        if (a.saved) { t.saved += Number(a.balance); t.hasSaved = true; } else t.available += Number(a.balance);
+        result.set(code, t);
+    }
+    return result;
+}
 const nextId = value => (value === '' || value == null ? null : Number(value));
 
 function options(list, selected, {none = null} = {}) {
     return (none ? `<option value="">${esc(none)}</option>` : '')
         + list.map(x => `<option value="${x.id}" ${x.id === selected ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+}
+
+/** The currencies the app offers, as the options of a select. */
+function currencyOptions(selected) {
+    return Object.entries(CURRENCY_NAMES).map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${esc(name)}</option>`).join('');
 }
 
 /** Account select: active accounts plus the one currently chosen, even if archived. */
@@ -39,7 +55,12 @@ const manualOrder = () => { try { const o = JSON.parse(safeStorage.get(orderKey(
 /** Comparator for the chosen order: by name, by balance (biggest first) or by the order the person arranged. */
 function accountComparator() {
     const mode = accountSortMode();
-    if (mode === 'value') return (a, b) => Number(b.balance) - Number(a.balance) || byName(a, b);
+    if (mode === 'value') {
+        // balances of different currencies are not comparable: the main currency comes first, then each other one in a
+        // group of its own (their order does not matter); inside a group, the biggest balance first
+        const rank = a => ((a.currency || currencyCode()) === currencyCode() ? '' : '~' + (a.currency || ''));
+        return (a, b) => rank(a).localeCompare(rank(b)) || Number(b.balance) - Number(a.balance) || byName(a, b);
+    }
     if (mode === 'manual') {
         const order = manualOrder();
         const pos = a => { const i = order.indexOf(a.id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
@@ -211,27 +232,41 @@ const statusLabel = o => o.status === 'PAID' ? `Pago em ${isoToBr(o.paidDate)}` 
 function paintAccountButton() {
     const btn = $('#account-btn');
     const acc = accountById(state.accountFilter);
-    btn.innerHTML = `${ico(acc ? (acc.icon || 'bank') : 'layers')}<span>${esc(acc ? accountLabel(acc) : 'Todas as contas')}</span>`;
+    btn.innerHTML = `${ico(acc ? (acc.icon || 'bank') : 'layers')}<span>${esc(acc ? accountLabel(acc) : state.currencyFilter ? T('Contas em {}').replace('{}', state.currencyFilter) : 'Todas as contas')}</span>`;
     btn.onclick = openAccountPicker;
 }
 
 function openAccountPicker() {
     const active = activeAccounts();
-    const available = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
-    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const mainTotals = accountTotalsByCurrency(active).get(currencyCode()) || {available: 0, saved: 0};
+    const available = mainTotals.available, saved = mainTotals.saved;
+    const totalsByCode = accountTotalsByCurrency(active);
+    const otherCodes = [...totalsByCode.keys()].filter(code => code !== currencyCode());
     const check = ico('check');
     const sheet = openSheet(`<h2>Ver lançamentos de</h2>
         <div class="list">
             <button class="row" data-acc=""><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
-                <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null ? check : ''}</button>
+                <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null && !state.currencyFilter ? check : ''}</button>
+            ${otherCodes.map(code => { const t = totalsByCode.get(code); return `<button class="row" data-cur="${code}"><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
+                <span class="grow"><span class="title">${esc(T('Contas em {}').replace('{}', code))}</span><span class="small muted">${esc(T('Disponível'))} ${esc(money(t.available, code))}${t.hasSaved ? esc(` · ${T('guardado')} ${money(t.saved, code)}`) : ''}</span></span>${state.accountFilter == null && state.currencyFilter === code ? check : ''}</button>`; }).join('')}
             ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}">${avatar(a.icon || 'bank', a.color)}
-                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
+                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance, a.currency)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
             <button class="row" id="acc-new"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button>
         </div>`);
     $('#acc-new', sheet).onclick = () => { closeSheet(); openAccountSheet(null); };
     $$('[data-acc]', sheet).forEach(b => b.onclick = () => {
         state.accountFilter = nextId(b.dataset.acc);
+        state.currencyFilter = null;
         safeStorage.set('account', b.dataset.acc);
+        safeStorage.set('currencyFilter', '');
+        closeSheet();
+        loadAll();
+    });
+    $$('[data-cur]', sheet).forEach(b => b.onclick = () => {
+        state.accountFilter = null;
+        state.currencyFilter = b.dataset.cur;
+        safeStorage.set('account', '');
+        safeStorage.set('currencyFilter', b.dataset.cur);
         closeSheet();
         loadAll();
     });
@@ -257,14 +292,14 @@ function dueSection() {
                 ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
                 <span class="grow"><span class="title">${esc(o.name)}</span>
                     <span class="small ${o.dueDate < today ? 'expense' : 'muted'}">${when(o.dueDate, o.type === 'INCOME')} · ${esc(o.accountName)}</span></span>
-                <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? money(o.amount) : 'a informar'}</span></button>`;
+                <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? moneyOf(o.accountId, o.amount) : 'a informar'}</span></button>`;
         }
         const t = it.tx;
         return `<button class="row" data-id="${t.id}">
             ${avatar(t.categoryIcon, t.categoryColor)}
             <span class="grow"><span class="title">${esc(t.name)}</span>
                 <span class="small ${t.date < today ? 'expense' : 'muted'}">${when(t.date, t.type === 'INCOME')} · ${esc(t.accountName)}</span></span>
-            <span class="amount ${t.type === 'INCOME' ? 'income' : 'expense'}">${money(t.amount)}</span></button>`;
+            <span class="amount ${t.type === 'INCOME' ? 'income' : 'expense'}">${moneyOf(t.accountId, t.amount)}</span></button>`;
     });
     return `<h2 class="section-title">A pagar e a receber</h2><div class="list">${rows.join('')}</div>`;
 }
@@ -280,7 +315,7 @@ function openOccurrenceSheet(o) {
     const sheet = openSheet(`
         <h2>${esc(o.name)}</h2>
         <p class="small muted sheet-sub">${statusLabel(o)} · ${esc(o.accountName)}${o.paymentMethodName ? ' · ' + esc(o.paymentMethodName) : ''}</p>
-        ${paid ? `<div class="notice">${ico('check')} Pago em ${isoToBr(o.paidDate)} — ${money(o.amount)}</div>
+        ${paid ? `<div class="notice">${ico('check')} Pago em ${isoToBr(o.paidDate)} — ${moneyOf(o.accountId, o.amount)}</div>
             ${tip('occ-undo', `Para desfazer, exclua o lançamento em Lançamentos: o pagamento volta a ficar pulado e pode ser reaberto.`)}`
         : `<form id="occ-form" novalidate>
             <input class="amount-input" id="o-amount" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(o.amount)}" aria-label="Valor">
@@ -457,9 +492,10 @@ function renderMoreMenu() {
             <label class="switch-row"><input type="checkbox" id="rollover" ${state.settings.budgetRollover ? 'checked' : ''}>
                 <span><strong>Levar a sobra do orçamento para o mês seguinte</strong>
                 ${info(`O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}`)}</span></label>
-            <div class="field" style="margin:0"><label for="currency">Moeda</label>
+            <div class="field" style="margin:0"><label for="currency">Moeda principal</label>
                 <select id="currency">${Object.entries(CURRENCY_NAMES).map(([code, name]) =>
-                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div>
+                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
+                <span class="small muted">Usada nos totais. Cada conta, caixinha, desejo e orçamento pode ter a sua.</span></div>
             <div class="field" style="margin:0"><label for="language">Idioma</label>
                 <select id="language">${[['pt', 'Português'], ['en', 'English'], ['es', 'Español']].map(([code, name]) =>
                     `<option value="${code}" ${LANG === code ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
@@ -606,12 +642,14 @@ function renderCategoriesPage() {
 function renderAccountsPage() {
     const active = activeAccounts();
     const archived = state.accounts.filter(a => a.archived);
-    const available = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
-    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
+    const totalsByCurrency = accountTotalsByCurrency(active);
+    const mainTotals = totalsByCurrency.get(currencyCode()) || {available: 0, saved: 0};
+    const available = mainTotals.available, saved = mainTotals.saved;
+    const otherCurrencies = [...totalsByCurrency.entries()].filter(([code]) => code !== currencyCode());
     const cardInfo = a => a.type === 'CREDIT_CARD' ? (a.closingDay && a.dueDay ? ` · fecha dia ${a.closingDay}, vence dia ${a.dueDay} · ver faturas` : ' · defina o fechamento') : '';
     const row = a => `<button class="row ${a.parentId ? 'sub-row' : ''} ${a.archived ? 'is-archived' : ''}" data-account="${a.id}">${avatar(a.icon || 'bank', a.color)}
         <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a) + cardInfo(a), a.saved ? 'guardado' : '', a.parentName ? 'dentro de ' + esc(a.parentName) : '', a.archived ? 'arquivada' : ''].filter(Boolean).join(' · ') || '&nbsp;'}</span></span>
-        <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance)}</span></button>`;
+        <span class="amount ${Number(a.balance) < 0 ? 'expense' : ''}">${money(a.balance, a.currency)}</span></button>`;
     const mode = accountSortMode();
     // in manual mode every active account gets arrows to move it among its siblings
     const manualRow = (a, list) => {
@@ -628,6 +666,7 @@ function renderAccountsPage() {
             ${[['name', 'Nome'], ['value', 'Valor'], ['manual', 'Manual']].map(([k, l]) => `<button type="button" data-sort="${k}" class="${k === mode ? 'active' : ''}">${l}</button>`).join('')}</div>
         <div class="card">
             <div class="small muted">Disponível nas contas</div><div style="font-size:1.5rem;font-weight:800">${money(available)}</div>
+            ${otherCurrencies.map(([code, t]) => `<div class="small muted" style="margin-top:6px">${esc(code)}: <strong>${money(t.available, code)}</strong>${t.hasSaved ? ` · guardado <strong>${money(t.saved, code)}</strong>` : ''}</div>`).join('')}
             ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
             ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só pagamentos feitos entram.`)}</div>
         <div class="list">${ordered.map(a => mode === 'manual' ? manualRow(a, ordered) : row(a)).join('')}
@@ -685,10 +724,13 @@ function openAccountSheet(account) {
                     : 'Para contas dentro de um banco (ex.: caixinha do Nubank). Para guardar dinheiro, transfira para ela.'}</span></div>
             <label class="switch-row"><input type="checkbox" id="a-saved" ${account?.saved ? 'checked' : ''}>
                 <span>Dinheiro guardado${info('O saldo aparece separado, pequeno embaixo do saldo total.')}</span></label>
-            <div class="field"><label for="a-balance">Saldo inicial (${esc(currencySymbol())})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
+            <div class="field"><label for="a-currency">Moeda</label>
+                <select id="a-currency">${Object.entries(CURRENCY_NAMES).map(([code, name]) => `<option value="${code}" ${(account?.currency || currencyCode()) === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
+                ${account ? '<span class="small muted">Mudar a moeda não converte os valores.</span>' : ''}</div>
+            <div class="field"><label for="a-balance" id="a-balance-label">Saldo inicial (${esc(currencySymbol(account?.currency || currencyCode()))})</label><input id="a-balance" inputmode="decimal" placeholder="0,00" value="${account ? fmtInput(account.initialBalance) : ''}">
                 <span class="small muted">Quanto havia na conta antes de começar a lançar aqui. Pode ser negativo.</span></div>
             ${account && account.type !== 'CREDIT_CARD' ? `<button type="button" class="btn block" id="a-adjust">${ico('pencil')} Corrigir saldo…</button>
-                <span class="small muted" style="margin-top:-6px">O saldo atual é ${money(account.balance)}. Se não bate com o do banco, informe o certo e o app anota a diferença.</span>` : ''}
+                <span class="small muted" style="margin-top:-6px">O saldo atual é ${money(account.balance, account.currency)}. Se não bate com o do banco, informe o certo e o app anota a diferença.</span>` : ''}
             <div class="field"><label>Ícone</label><div class="icon-picker" id="a-icons"></div></div>
             ${account ? `<label class="switch-row"><input type="checkbox" id="a-archived" ${account.archived ? 'checked' : ''}><span>Arquivada${info(`Mantém o histórico, mas não aparece ao lançar.`)}</span></label>` : ''}
             <div class="form-actions">
@@ -698,6 +740,7 @@ function openAccountSheet(account) {
         </form>`);
     const icon = iconPicker(sheet, '#a-icons', ACCOUNT_ICONS, account?.icon || 'bank');
     const colorOf = colorPicker(sheet, '#a-colors', account?.color || '#64B5F6');
+    $('#a-currency', sheet).onchange = e => { $('#a-balance-label', sheet).textContent = T(`Saldo inicial (${currencySymbol(e.target.value)})`); };
     const paintCard = () => {
         const card = $('#a-card-toggle', sheet).checked;
         $('#a-card', sheet).hidden = !card;
@@ -727,7 +770,7 @@ function openAccountSheet(account) {
                 && Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31)) {
             return toast('Informe o dia de fechamento e o de vencimento (de 1 a 31).');
         }
-        const body = {name, type, color: colorOf(), icon: icon(), initialBalance,
+        const body = {name, type, color: colorOf(), icon: icon(), initialBalance, currency: $('#a-currency', sheet).value,
             parentId: hasParts ? null : nextId($('#a-parent', sheet).value),
             archived: account ? $('#a-archived', sheet).checked : false, saved: $('#a-saved', sheet).checked,
             closingDay: type === 'CREDIT_CARD' ? closingDay : null, dueDay: type === 'CREDIT_CARD' ? dueDay : null};
@@ -740,9 +783,9 @@ function openBalanceAdjust(account) {
     const current = Number(account.balance);
     const sheet = openSheet(`
         <h2>Corrigir saldo</h2>
-        <p class="small muted sheet-sub">${esc(account.name)} · saldo no app: ${money(current)}</p>
+        <p class="small muted sheet-sub">${esc(account.name)} · saldo no app: ${money(current, account.currency)}</p>
         <form id="adj-form" novalidate>
-            <div class="field"><label for="adj-balance">Saldo atual de verdade (${esc(currencySymbol())})</label>
+            <div class="field"><label for="adj-balance">Saldo atual de verdade (${esc(currencySymbol(account.currency))})</label>
                 <input class="amount-input" id="adj-balance" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(account.balance)}"></div>
             <p class="small center" id="adj-diff" aria-live="polite"></p>
             ${tip('adjust-balance', 'O app registra a diferença como “Correção de saldo”. Se errar, exclua esse lançamento.')}
@@ -754,7 +797,7 @@ function openBalanceAdjust(account) {
         if (Number.isNaN(typed)) { diffBox.textContent = ''; return; }
         const diff = Math.round((typed - current) * 100) / 100;
         diffBox.className = 'small center ' + (diff > 0 ? 'income' : diff < 0 ? 'expense' : 'muted');
-        diffBox.textContent = diff === 0 ? 'O saldo já é esse.' : diff > 0 ? `Vai somar ${money(diff)} ao saldo.` : `Vai tirar ${money(-diff)} do saldo.`;
+        diffBox.textContent = diff === 0 ? 'O saldo já é esse.' : diff > 0 ? `Vai somar ${money(diff, account.currency)} ao saldo.` : `Vai tirar ${money(-diff, account.currency)} do saldo.`;
     };
     field.addEventListener('input', paint);
     paint();
@@ -827,14 +870,14 @@ async function renderRecurringPage() {
             ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
             <span class="grow"><span class="title">${esc(o.name)}</span><span class="small muted">${statusLabel(o)} · ${esc(o.accountName)}</span></span>
             <span class="status-tag ${o.status.toLowerCase()}">${o.status === 'PAID' ? 'Pago' : o.status === 'SKIPPED' ? 'Pulado' : 'Pendente'}</span>
-            <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? money(o.amount) : '—'}</span></button>`).join('')}</div>`
+            <span class="amount ${o.type === 'INCOME' ? 'income' : 'expense'}">${o.amount != null ? moneyOf(o.accountId, o.amount) : '—'}</span></button>`).join('')}</div>`
             : '<div class="card empty">Nenhum pagamento recorrente neste mês.</div>'}
         <h2 class="section-title">Regras</h2>
         <div class="list">${rules.map(r => `<button class="row ${r.active ? '' : 'is-archived'}" data-rule="${r.id}">
             ${avatar(r.categoryIcon || 'repeat', r.categoryColor)}
             <span class="grow"><span class="title">${esc(r.name)}</span>
                 <span class="small muted">Todo dia ${r.dayOfMonth} · ${esc(r.accountName)}${r.paymentMethodName ? ' · ' + esc(r.paymentMethodName) : ''}${r.active ? '' : ' · pausado'}</span></span>
-            <span class="amount ${r.type === 'INCOME' ? 'income' : 'expense'}">${r.variableAmount ? 'variável' : money(r.amount)}</span></button>`).join('')}
+            <span class="amount ${r.type === 'INCOME' ? 'income' : 'expense'}">${r.variableAmount ? 'variável' : moneyOf(r.accountId, r.amount)}</span></button>`).join('')}
             <button class="row" id="new-rule"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Novo pagamento recorrente</span></button></div></div>`;
     bindBack();
     bindDueRows($('#view'));
@@ -916,11 +959,14 @@ function renderGoals() {
     const pots = state.pots, wishes = state.wishes;
     const tab = state.wishTab;
     const shown = wishes.filter(w => w.status === tab);
-    const wishedTotal = wishes.filter(w => w.status === 'WISHED').reduce((sum, w) => sum + Number(w.estimatedPrice || 0), 0);
+    // the estimated total adds up each currency on its own
+    const wishedByCurrency = new Map();
+    wishes.filter(w => w.status === 'WISHED' && w.estimatedPrice != null).forEach(w => wishedByCurrency.set(w.currency, (wishedByCurrency.get(w.currency) || 0) + Number(w.estimatedPrice)));
+    const wishedTotals = [...wishedByCurrency.entries()].filter(([, value]) => value > 0);
     const potCard = p => {
         const balance = Number(p.balance), goal = p.goal == null ? null : Number(p.goal);
         const pct = goal ? Math.min(100, (balance / goal) * 100) : null;
-        let hint = p.mode === 'FIXED' ? `${money(p.monthlyAmount)} por mês` : 'Aportes manuais';
+        let hint = p.mirrored ? 'Saldo da conta' : p.mode === 'FIXED' ? `${money(p.monthlyAmount, p.currency)} por mês` : 'Aportes manuais';
         if (p.accountName) hint += ` · ${p.accountName}`;
         if (goal && balance < goal && p.mode === 'FIXED' && Number(p.monthlyAmount) > 0) {
             hint += ` · meta em ~${Math.ceil((goal - balance) / Number(p.monthlyAmount))} meses`;
@@ -930,15 +976,15 @@ function renderGoals() {
         return `<button class="card pot-card ${p.active ? '' : 'is-archived'}" data-pot="${p.id}">
             <span class="pot-top">${avatar(p.icon || 'coins', p.color)}
                 <span class="grow"><strong>${esc(p.name)}</strong><span class="small muted" style="display:block">${esc(hint)}</span></span>
-                <strong>${money(balance)}</strong></span>
-            ${goal ? `<span class="progress"><i style="width:${pct}%"></i></span><span class="budget-meta"><span>${pct.toFixed(0)}% de ${money(goal)}</span></span>` : ''}</button>`;
+                <strong>${money(balance, p.currency)}</strong></span>
+            ${goal ? `<span class="progress"><i style="width:${pct}%"></i></span><span class="budget-meta"><span>${pct.toFixed(0)}% de ${money(goal, p.currency)}</span></span>` : ''}</button>`;
     };
     const wishRow = w => `<div class="row wish-row" data-wish="${w.id}">
         <span class="avatar" style="background:var(--surface-2)">${ico('gift')}</span>
         <span class="grow"><span class="title">${esc(w.name)}</span>
             <span class="small muted">${w.status === 'BOUGHT'
-                ? `Comprado em ${isoToBr(w.purchaseDate)} por ${money(w.realPrice)}${w.estimatedPrice != null ? ` (estimado ${money(w.estimatedPrice)})` : ''}`
-                : `${w.estimatedPrice != null ? 'Estimado ' + money(w.estimatedPrice) : 'Sem preço estimado'}${w.potName ? ' · ' + esc(w.potName) : ''}`}</span></span>
+                ? `Comprado em ${isoToBr(w.purchaseDate)} por ${money(w.realPrice, w.currency)}${w.estimatedPrice != null ? ` (estimado ${money(w.estimatedPrice, w.currency)})` : ''}`
+                : `${w.estimatedPrice != null ? 'Estimado ' + money(w.estimatedPrice, w.currency) : 'Sem preço estimado'}${w.potName ? ' · ' + esc(w.potName) : ''}`}</span></span>
         ${w.status === 'WISHED' ? `<button class="chip buy-chip" data-buy="${w.id}">Comprei</button>` : ''}</div>`;
 
     $('#view').innerHTML = `<div class="stack">
@@ -948,7 +994,7 @@ function renderGoals() {
         <h2 class="section-title">Lista de desejos</h2>
         <div class="chips">${[['WISHED', 'Desejados'], ['BOUGHT', 'Comprados'], ['DISCARDED', 'Descartados']].map(([v, l]) =>
             `<button class="chip ${tab === v ? 'active' : ''}" data-wtab="${v}">${l}</button>`).join('')}</div>
-        ${tab === 'WISHED' && wishedTotal > 0 ? `<div class="small muted">Total estimado: <strong>${money(wishedTotal)}</strong></div>` : ''}
+        ${tab === 'WISHED' && wishedTotals.length ? `<div class="small muted">Total estimado: ${wishedTotals.map(([code, value]) => `<strong>${money(value, code)}</strong>`).join(' · ')}</div>` : ''}
         ${shown.length ? `<div class="list">${shown.map(wishRow).join('')}</div>`
             : `<div class="card empty"><div class="big">${ico('gift')}</div>${tab === 'WISHED' ? 'Nada na lista. Anote o que você quer comprar<br>e o preço estimado.' : 'Nada por aqui.'}</div>`}
         <button class="btn block" id="new-wish">${ico('plus')} Novo desejo</button>
@@ -974,12 +1020,16 @@ function openPotSheet(pot) {
             <div class="field"><label>Cor</label><div class="swatches" id="p-colors"></div></div>
             <div class="field"><label>Como ela cresce?</label>
                 <div class="seg" id="p-mode"><button type="button" data-mode="FIXED">Valor fixo por mês</button><button type="button" data-mode="VARIABLE">Eu aporto quando quiser</button></div></div>
-            <div class="field" id="p-monthly-field"><label for="p-monthly">Aporte mensal (${currencySymbol()})</label><input id="p-monthly" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.monthlyAmount)}">
+            <div class="field" id="p-monthly-field"><label for="p-monthly" id="p-monthly-label">Aporte mensal (${currencySymbol(pot ? pot.currency : currencyCode())})</label><input id="p-monthly" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.monthlyAmount)}">
                 <span class="small muted">Aporte automático no dia 1, a partir do mês inicial. O dinheiro continua na conta.</span></div>
+            <div class="field"><label for="p-currency">Moeda</label>
+                <select id="p-currency">${currencyOptions(pot ? pot.currency : currencyCode())}</select>
+                <span class="small muted" id="p-currency-note" hidden>Com uma conta ligada, vale a moeda dela.</span></div>
             <div class="field"><label for="p-account">Banco / conta</label>
                 <select id="p-account"><option value="">Nenhum (sem vínculo)</option>${orderedAccounts(state.accounts.filter(a => a.type !== 'CREDIT_CARD' && (!a.archived || a.id === pot?.accountId))).map(a =>
                     `<option value="${a.id}" ${a.id === pot?.accountId ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select>
-                <span class="small muted">Onde esse dinheiro está guardado (ex.: a caixinha do Nubank). É só um vínculo para você saber onde ele está: o dinheiro continua na conta.</span></div>
+                <span class="small muted">Onde o dinheiro está guardado. É só um vínculo; o dinheiro continua na conta.</span>
+                <span class="small muted" id="p-mirror-note" hidden>Conta de dinheiro guardado: a caixinha mostra o saldo dela.</span></div>
             <div class="grid2">
                 <div class="field"><label for="p-goal">Meta (opcional)</label><input id="p-goal" inputmode="decimal" placeholder="0,00" value="${fmtInput(pot?.goal)}"></div>
                 <div class="field"><label for="p-start">Começa em</label><select id="p-start" ${pot ? 'disabled' : ''}>${monthOptions(monthRange(shiftMonth(current, -12), 19), pot?.startMonth || current)}</select></div>
@@ -999,6 +1049,19 @@ function openPotSheet(pot) {
     };
     $$('#p-mode button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); });
     paintMode();
+    // with an account the account's currency counts; and an account of saved money lends its balance to the pot
+    const paintPotCurrency = () => {
+        const account = accountById(nextId($('#p-account', sheet).value));
+        const select = $('#p-currency', sheet);
+        if (account) select.value = account.currency;
+        select.disabled = !!account;
+        $('#p-currency-note', sheet).hidden = !account;
+        $('#p-mirror-note', sheet).hidden = !(account && account.saved);
+        $('#p-monthly-label', sheet).textContent = T(`Aporte mensal (${currencySymbol(select.value)})`);
+    };
+    $('#p-account', sheet).onchange = paintPotCurrency;
+    $('#p-currency', sheet).onchange = paintPotCurrency;
+    paintPotCurrency();
     if (pot) {
         $('#p-del', sheet).onclick = async () => {
             if (await confirmDialog(`Excluir a caixinha “${pot.name}” e seu histórico? Desejos vinculados ficarão sem caixinha.`, {okLabel: 'Excluir'}))
@@ -1016,7 +1079,7 @@ function openPotSheet(pot) {
         if (goalText && !(goal > 0)) return toast('A meta deve ser maior que zero.');
         const body = {name, color: colorOf(), icon: icon(), goal, mode, monthlyAmount: monthly,
             startMonth: pot ? pot.startMonth : $('#p-start', sheet).value, active: $('#p-active', sheet).checked,
-            accountId: nextId($('#p-account', sheet).value)};
+            accountId: nextId($('#p-account', sheet).value), currency: $('#p-account', sheet).value ? undefined : $('#p-currency', sheet).value};
         run(() => api(pot ? `/pots/${pot.id}` : '/pots', {method: pot ? 'PUT' : 'POST', body}), 'Caixinha salva');
     };
 }
@@ -1027,21 +1090,33 @@ async function openPotDetail(pot) {
     const kindLabel = {AUTO: 'Aporte mensal', MANUAL: 'Aporte', WITHDRAWAL: 'Retirada', PURCHASE: 'Compra'};
     const sheet = openSheet(`
         <h2>${esc(pot.name)}</h2>
-        <div class="pot-balance">${money(pot.balance)}${pot.goal != null ? `<span class="muted"> de ${money(pot.goal)}</span>` : ''}</div>
+        <div class="pot-balance">${money(pot.balance, pot.currency)}${pot.goal != null ? `<span class="muted"> de ${money(pot.goal, pot.currency)}</span>` : ''}</div>
         ${pot.accountName ? `<p class="small muted" style="margin:-4px 0 10px">Guardado em ${esc(pot.accountName)}</p>` : ''}
-        <div class="form-actions" style="margin-bottom:12px">
+        ${pot.mirrored ? `<p class="small muted" style="margin:0 0 10px">O saldo vem da conta “${esc(pot.accountName)}”. Para guardar ou tirar dinheiro, faça uma transferência.</p>
+        <div class="form-actions" style="margin-bottom:12px"><button type="button" class="btn primary" id="pd-transfer">Nova transferência</button></div>` : `<div class="form-actions" style="margin-bottom:12px">
             <button type="button" class="btn" id="pd-withdraw">Retirar</button>
             <button type="button" class="btn primary" id="pd-deposit">Aportar</button>
-        </div>
+        </div>`}
         <h3 class="section-title">Histórico</h3>
         ${entries.length ? `<div class="list">${entries.map(en => `<div class="row">
             <span class="grow"><span class="title">${kindLabel[en.kind]}${en.note ? ' · ' + esc(en.note) : ''}</span><span class="small muted">${isoToBr(en.date)}</span></span>
-            <span class="amount ${Number(en.amount) < 0 ? 'expense' : 'income'}">${Number(en.amount) < 0 ? '−' : '+'} ${money(Math.abs(Number(en.amount)))}</span>
+            <span class="amount ${Number(en.amount) < 0 ? 'expense' : 'income'}">${Number(en.amount) < 0 ? '−' : '+'} ${money(Math.abs(Number(en.amount)), pot.currency)}</span>
             ${en.kind === 'MANUAL' || en.kind === 'WITHDRAWAL' ? `<button class="icon-btn small" data-del-entry="${en.id}" aria-label="Remover">${ico('trash')}</button>` : ''}</div>`).join('')}</div>`
             : '<div class="card empty">Sem movimentos ainda.</div>'}
         <div class="form-actions" style="margin-top:12px"><button type="button" class="btn" id="pd-edit">Editar caixinha</button></div>`);
-    $('#pd-deposit', sheet).onclick = () => openMoveSheet(pot, 'deposit');
-    $('#pd-withdraw', sheet).onclick = () => openMoveSheet(pot, 'withdraw');
+    if (pot.mirrored) {
+        $('#pd-transfer', sheet).onclick = () => {
+            closeSheet();
+            openTransactionSheet(null);
+            setTimeout(() => { // opens as a transfer to the account the pot shows
+                const mode = $('[data-mode="TRANSFER"]'), to = $('#f-to');
+                if (mode && to) { mode.click(); to.value = String(pot.accountId); to.dispatchEvent(new Event('change')); }
+            }, 80);
+        };
+    } else {
+        $('#pd-deposit', sheet).onclick = () => openMoveSheet(pot, 'deposit');
+        $('#pd-withdraw', sheet).onclick = () => openMoveSheet(pot, 'withdraw');
+    }
     $('#pd-edit', sheet).onclick = () => openPotSheet(pot);
     $$('[data-del-entry]', sheet).forEach(b => b.onclick = async () => {
         if (await confirmDialog('Remover este movimento?', {okLabel: 'Remover'}))
@@ -1076,9 +1151,10 @@ function openWishSheet(item) {
         <h2>${item ? 'Editar desejo' : 'Novo desejo'}</h2>
         <form id="w-form" novalidate>
             <div class="field"><label for="w-name">Produto</label><input id="w-name" maxlength="120" placeholder="Ex.: Fone de ouvido" value="${esc(item?.name)}"></div>
+            <div class="field"><label for="w-currency">Moeda</label><select id="w-currency" ${item && item.status === 'BOUGHT' ? 'disabled' : ''}>${currencyOptions(item ? item.currency : currencyCode())}</select></div>
             <div class="grid2">
-                <div class="field"><label for="w-price">Preço estimado (${currencySymbol()})</label><input id="w-price" inputmode="decimal" placeholder="0,00" value="${fmtInput(item?.estimatedPrice)}"></div>
-                <div class="field"><label for="w-pot">Pagar com a caixinha</label><select id="w-pot">${options(state.pots, item?.potId, {none: 'Nenhuma'})}</select></div>
+                <div class="field"><label for="w-price" id="w-price-label">Preço estimado (${currencySymbol(item ? item.currency : currencyCode())})</label><input id="w-price" inputmode="decimal" placeholder="0,00" value="${fmtInput(item?.estimatedPrice)}"></div>
+                <div class="field"><label for="w-pot">Pagar com a caixinha</label><select id="w-pot"></select></div>
             </div>
             <div class="field"><label for="w-url">Link</label><input id="w-url" maxlength="500" placeholder="Opcional" value="${esc(item?.url)}"></div>
             <div class="field"><label for="w-notes">Observação</label><textarea id="w-notes" rows="2" maxlength="255">${esc(item?.notes)}</textarea></div>
@@ -1090,6 +1166,16 @@ function openWishSheet(item) {
                 <button type="submit" class="btn primary">Salvar</button>
             </div>
         </form>`);
+    // only the pots in the item's currency (and that keep a balance of their own) can pay for it
+    const paintWishPots = () => {
+        const code = $('#w-currency', sheet).value;
+        const chosen = nextId($('#w-pot', sheet).value) ?? item?.potId;
+        const pots = state.pots.filter(p => p.currency === code && !p.mirrored);
+        $('#w-pot', sheet).innerHTML = options(pots, chosen, {none: 'Nenhuma'});
+        $('#w-price-label', sheet).textContent = T(`Preço estimado (${currencySymbol(code)})`);
+    };
+    $('#w-currency', sheet).onchange = () => { $('#w-pot', sheet).value = ''; paintWishPots(); };
+    paintWishPots();
     if (item) {
         $('#w-del', sheet).onclick = async () => {
             const extra = item.status === 'BOUGHT' ? ' O lançamento da compra continua.' : '';
@@ -1107,7 +1193,7 @@ function openWishSheet(item) {
         const estimatedPrice = priceText ? parseAmount(priceText) : null;
         if (!name) return toast('Informe o nome do produto.');
         if (priceText && !(estimatedPrice > 0)) return toast('O preço estimado deve ser maior que zero.');
-        const body = {name, estimatedPrice, potId: nextId($('#w-pot', sheet).value),
+        const body = {name, estimatedPrice, potId: nextId($('#w-pot', sheet).value), currency: $('#w-currency', sheet).value,
             url: $('#w-url', sheet).value.trim() || null, notes: $('#w-notes', sheet).value.trim() || null};
         run(() => api(item ? `/wishes/${item.id}` : '/wishes', {method: item ? 'PUT' : 'POST', body}), 'Desejo salvo');
     };
@@ -1115,18 +1201,21 @@ function openWishSheet(item) {
 
 function openBuySheet(item) {
     const pot = item.potId ? state.pots.find(p => p.id === item.potId) : null;
-    const defaultAccount = state.accountFilter || mainAccountId();
+    // the purchase goes on an account in the item's currency
+    const accountsHere = orderedAccounts(activeAccounts().filter(a => a.currency === item.currency));
+    const preferred = state.accountFilter || mainAccountId();
+    const defaultAccount = (accountsHere.find(a => a.id === preferred) || accountsHere[0] || {}).id;
     const sheet = openSheet(`
         <h2>Comprei: ${esc(item.name)}</h2>
         <form id="b2-form" novalidate>
             <input class="amount-input" id="b2-price" inputmode="decimal" placeholder="0,00" autocomplete="off" aria-label="Preço pago" value="${fmtInput(item.estimatedPrice)}">
-            <p class="small muted center">${item.estimatedPrice != null ? `Estimado: ${money(item.estimatedPrice)}. ` : ''}Informe o preço real que você pagou.</p>
+            <p class="small muted center">${item.estimatedPrice != null ? `Estimado: ${money(item.estimatedPrice, item.currency)}. ` : ''}Informe o preço real que você pagou.</p>
             ${dateField('b2-date', todayIso(), 'Data da compra')}
             <div class="field"><label for="b2-inst">Parcelas${info('Em quantas vezes foi paga. O preço acima é o total: a 1ª parcela entra na data da compra e as outras ficam “a pagar” nos meses seguintes (no cartão de crédito, todas já entram na fatura).')}</label>
                 <input id="b2-inst" type="number" inputmode="numeric" min="1" max="60" step="1" value="1" aria-label="Número de parcelas"></div>
             <p class="small muted center" id="b2-inst-hint" hidden></p>
             <div class="grid2">
-                <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account" data-create="account">${accountOptions(defaultAccount)}</select></div>
+                <div class="field"><label for="b2-account">Em qual conta?</label><select id="b2-account">${accountsHere.map(a => `<option value="${a.id}" ${a.id === defaultAccount ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
                 <div class="field"><label for="b2-method">Forma de pagamento</label><select id="b2-method" data-create="method">${options(state.methods, null, {none: '—'})}</select></div>
             </div>
             <div class="field"><label for="b2-category">Categoria</label><select id="b2-category">${categoryOptions('EXPENSE', null)}</select></div>
@@ -1139,12 +1228,13 @@ function openBuySheet(item) {
         const n = Number($('#b2-inst', sheet).value || 1), total = parseAmount($('#b2-price', sheet).value);
         const hint = $('#b2-inst-hint', sheet);
         hint.hidden = !(n > 1 && total > 0);
-        if (!hint.hidden) hint.textContent = `${n}× de ${money(Math.floor(total * 100 / n) / 100)} (a primeira pode ter alguns centavos a mais)`;
+        if (!hint.hidden) hint.textContent = `${n}× de ${money(Math.floor(total * 100 / n) / 100, item.currency)} (a primeira pode ter alguns centavos a mais)`;
     };
     $('#b2-inst', sheet).addEventListener('input', paintInstallments);
     $('#b2-price', sheet).addEventListener('input', paintInstallments);
     $('#b2-form', sheet).onsubmit = e => {
         e.preventDefault();
+        if (!accountsHere.length) return toast('Crie uma conta nessa moeda para registrar a compra.');
         const price = parseAmount($('#b2-price', sheet).value);
         if (!(price > 0)) return toast('Informe o preço pago.');
         if (!dateValue()) return toast('Informe uma data válida.');

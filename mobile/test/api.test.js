@@ -257,7 +257,7 @@ describe('resumo e orcamentos', () => {
     it('limite geral e sobra acumulada', () => {
         const food = ok('GET', '/categories').find(c => c.name === 'Alimentação');
         ok('PUT', '/budgets/total?month=2026-01', {amount: 1000});
-        assert.deepEqual(ok('GET', '/budgets/total?month=2026-05'), {amount: 1000, fromMonth: '2026-01'});
+        assert.deepEqual(ok('GET', '/budgets/total?month=2026-05'), {amount: 1000, fromMonth: '2026-01', currency: 'BRL'});
         ok('PUT', `/budgets/${food.id}?month=2026-01`, {amount: 300});
         ok('PUT', '/api/settings', {budgetRollover: true});
         // a sobra comeca a contar no mes atual (maio): nada sobra de abril para maio

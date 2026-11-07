@@ -46,13 +46,28 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '
 /** Display currency chosen in the settings (values are never converted, only formatted). */
 const currencyFormats = {};
 const currencyCode = () => (typeof state !== 'undefined' && state.settings && state.settings.currency) || 'BRL';
-function currencyFormat() {
-    const code = currencyCode();
+function currencyFormat(code = currencyCode()) {
     if (!currencyFormats[code]) currencyFormats[code] = new Intl.NumberFormat(LOCALE, {style: 'currency', currency: code});
     return currencyFormats[code];
 }
-const money = v => currencyFormat().format(Number(v || 0));
-const currencySymbol = () => (currencyFormat().formatToParts(0).find(p => p.type === 'currency') || {value: ''}).value;
+/** On the screens an account filter applies to, the numbers are in that account's currency; elsewhere, the main one. */
+function viewCurrency() {
+    if (typeof state === 'undefined' || state.sub) return currencyCode();
+    if (state.tab === 'budgets') return state.budgetCurrency || currencyCode();
+    if (!['home', 'transactions'].includes(state.tab)) return currencyCode();
+    if (state.accountFilter) {
+        const account = state.accounts.find(a => a.id === state.accountFilter);
+        return (account && account.currency) || currencyCode();
+    }
+    return state.currencyFilter || currencyCode();
+}
+/** Money in a currency; without one, the currency of the view (see above). */
+const money = (v, code) => currencyFormat(code || viewCurrency()).format(Number(v || 0));
+const currencySymbol = code => (currencyFormat(code || viewCurrency()).formatToParts(0).find(p => p.type === 'currency') || {value: ''}).value;
+/** The currency of an account (by id or by name); the main one when it is not known. */
+const currencyOfAccount = id => ((typeof state !== 'undefined' && state.accounts.find(a => a.id === id)) || {}).currency || currencyCode();
+const currencyOfAccountName = name => ((typeof state !== 'undefined' && state.accounts.find(a => a.name === name)) || {}).currency || currencyCode();
+const moneyOf = (accountId, v) => money(v, currencyOfAccount(accountId));
 
 const pad = n => String(n).padStart(2, '0');
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -334,6 +349,8 @@ const state = {
     pots: [],
     wishes: [],
     accountFilter: Number(safeStorage.get('account')) || null,
+    currencyFilter: safeStorage.get('currencyFilter') || null, // "all accounts in this currency" (instead of one account)
+    budgetCurrency: null, // the currency shown on the budgets screen (null = the main one)
     sub: null,
     wishTab: 'WISHED'
 };
@@ -399,7 +416,7 @@ async function loadAll({keepScroll = true} = {}) {
     try {
         // Occurrences first: loading them creates (and, when enabled, pays) what is due, which the lists below must show.
         state.occurrences = await api(`/recurring/occurrences?month=${state.month}`);
-        const accountParam = state.accountFilter ? `&accountId=${state.accountFilter}` : '';
+        const accountParam = state.accountFilter ? `&accountId=${state.accountFilter}` : state.currencyFilter ? `&currency=${state.currencyFilter}` : '';
         const [categories, accounts, methods, settings, pots, wishes, tags, pending, summary, transactions, transfers, attachCounts, templates, profiles, syncStatus] = await Promise.all([
             api('/categories'),
             api('/accounts'),
@@ -434,6 +451,12 @@ async function loadAll({keepScroll = true} = {}) {
             return;
         }
         state.pendingAll = pending;
+        if (state.currencyFilter && !accounts.some(a => !a.archived && a.currency === state.currencyFilter)) {
+            state.currencyFilter = null; // no account in that currency any more
+            safeStorage.set('currencyFilter', '');
+            return loadAll();
+        }
+        if (state.budgetCurrency && !accounts.some(a => a.currency === state.budgetCurrency)) state.budgetCurrency = null;
         if (state.accountFilter && !accounts.some(a => a.id === state.accountFilter)) {
             state.accountFilter = null; // the saved account no longer exists
             safeStorage.set('account', '');
@@ -441,10 +464,14 @@ async function loadAll({keepScroll = true} = {}) {
         }
         state.summary = summary;
         state.rangeTx = null; // reloaded on demand: it may be stale after a change
-        state.transactions = transactions;
-        state.transfers = transfers;
-        // Budgets are per category, across every account, so they keep using the unfiltered summary.
-        state.summaryAll = state.accountFilter ? await api(`/api/summary?month=${state.month}`) : summary;
+        // "all accounts in a currency": the lists only keep what belongs to that currency
+        const inFilterCurrency = id => currencyOfAccount(id) === state.currencyFilter;
+        const byCurrency = !state.accountFilter && state.currencyFilter;
+        state.transactions = byCurrency ? transactions.filter(t => inFilterCurrency(t.accountId)) : transactions;
+        state.transfers = byCurrency ? transfers.filter(t => inFilterCurrency(t.fromAccountId) || inFilterCurrency(t.toAccountId)) : transfers;
+        // Budgets are per category, across every account of one currency, so they keep using a summary of their own.
+        state.summaryAll = state.accountFilter || state.currencyFilter || state.budgetCurrency
+            ? await api(`/api/summary?month=${state.month}${state.budgetCurrency ? `&currency=${state.budgetCurrency}` : ''}`) : summary;
         render();
         window.scrollTo({top: keepScroll ? scrollY : 0});
         loadReminders();
@@ -498,7 +525,7 @@ function txRow(t) {
         ${avatar(t.categoryIcon, t.categoryColor)}
         <span class="grow"><span class="title">${esc(t.name)}</span>
         <span class="small muted">${esc(t.adjustment ? 'Correção de saldo' : txCategoryLabel(t))} · ${esc(t.accountName || '')}${t.paymentMethodName ? ' · ' + esc(t.paymentMethodName) : ''}<span class="tags">${flag}${tags}</span></span></span>
-        <span class="amount ${income ? 'income' : 'expense'}">${income ? '+' : '−'} ${money(t.amount)}</span>
+        <span class="amount ${income ? 'income' : 'expense'}">${income ? '+' : '−'} ${moneyOf(t.accountId, t.amount)}</span>
     </button>`;
 }
 
@@ -507,7 +534,7 @@ function transferRow(t) {
         <span class="avatar" style="background:var(--surface-2)">${ico('transfer')}</span>
         <span class="grow"><span class="title">${esc(t.description || 'Transferência')}</span>
         <span class="small muted">${esc(t.fromAccountName)} → ${esc(t.toAccountName)}</span></span>
-        <span class="amount transfer">${money(t.amount)}</span>
+        <span class="amount transfer">${money(t.amount, currencyOfAccount(t.fromAccountId))}${t.toAmount != null ? ` → ${money(t.toAmount, currencyOfAccount(t.toAccountId))}` : ''}</span>
     </button>`;
 }
 
@@ -565,13 +592,22 @@ function donut(groups, total) {
 /** The big number on the home screen: what is in the accounts right now (or in the chosen account), not the month's result. */
 function homeTotal() {
     const picked = state.accountFilter ? accountById(state.accountFilter) : null;
-    if (picked) return {label: `Saldo de ${esc(picked.name)}`, value: Number(picked.balance), sub: '', color: normalizeHex(picked.color)};
-    // the big number is what is available; what is saved inside accounts (piggy banks, investments) shows small below
+    if (picked) {
+        // the parts of this account marked as saved money (its piggy banks) show small below, not added to the balance
+        const parts = state.accounts.filter(a => a.parentId === picked.id && a.saved && !a.archived);
+        const saved = parts.reduce((sum, a) => sum + Number(a.balance), 0);
+        return {label: `Saldo de ${esc(picked.name)}`, value: Number(picked.balance), sub: parts.length ? `Guardado: ${esc(money(saved, picked.currency))}` : '', others: '', currency: picked.currency, color: normalizeHex(picked.color)};
+    }
+    // the big number is what is available in the currency being viewed (the main one, or the one chosen); what is saved
+    // inside accounts (piggy banks, investments) shows small below, and so does each other currency
+    const view = state.currencyFilter || currencyCode();
     const active = activeAccounts();
-    const value = active.filter(a => !a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
-    const saved = active.filter(a => a.saved).reduce((sum, a) => sum + Number(a.balance), 0);
-    const hasSaved = active.some(a => a.saved);
-    return {label: 'Saldo total', value, sub: hasSaved ? `Guardado: ${esc(money(saved))}` : '', color: ''};
+    const sums = accountTotalsByCurrency(active);
+    const mine = sums.get(view) || {available: 0, saved: 0, hasSaved: false};
+    const others = [...sums.entries()].filter(([code]) => code !== view)
+        .map(([code, t]) => `${esc(money(t.available, code))}${t.hasSaved ? ` (guardado ${esc(money(t.saved, code))})` : ''}`).join(' · ');
+    return {label: state.currencyFilter ? `Saldo em ${esc(view)}` : 'Saldo total', value: mine.available, currency: view,
+        sub: mine.hasSaved ? `Guardado: ${esc(money(mine.saved, view))}` : '', others: others ? `Outras moedas: ${others}` : '', color: ''};
 }
 
 function renderHome() {
@@ -596,8 +632,9 @@ function renderHome() {
         ${welcomeCard()}
         <div class="card hero" ${total.color ? `style="--primary:${total.color};--on-primary:${readableOn(total.color)}"` : ''}>
             <div class="label">${total.label}</div>
-            <div class="balance ${total.sub ? 'has-sub' : ''}">${money(total.value)}</div>
-            ${total.sub ? `<div class="hero-sub">${total.sub}</div>` : ''}
+            <div class="balance ${total.sub || total.others ? 'has-sub' : ''}">${money(total.value, total.currency)}</div>
+            ${total.sub ? `<div class="hero-sub" ${total.others ? 'style="margin-bottom:2px"' : ''}>${total.sub}</div>` : ''}
+            ${total.others ? `<div class="hero-sub">${total.others}</div>` : ''}
             <div class="hero-row">
                 <div class="hero-pill"><div class="label">${ico('arrow-up')} Receitas</div><div class="v">${money(s.income)}</div></div>
                 <div class="hero-pill"><div class="label">${ico('arrow-down')} Despesas</div><div class="v">${money(s.expense)}</div></div>
@@ -843,8 +880,11 @@ function refreshFilterChrome() {
 function totalsStrip(items) {
     if (!items.some(it => it.tx)) return '';
     let income = 0, expense = 0;
+    const view = viewCurrency();
+    const inView = it => currencyOfAccount(it.tx.accountId) === view;
+    const mixed = items.some(it => it.tx && !inView(it));
     items.forEach(it => {
-        if (!it.tx || it.tx.status === 'PENDING') return;
+        if (!it.tx || it.tx.status === 'PENDING' || !inView(it)) return;
         if (it.tx.type === 'INCOME') income += Number(it.tx.amount);
         else expense += Number(it.tx.amount);
     });
@@ -852,7 +892,7 @@ function totalsStrip(items) {
         <div><span class="small muted">Receitas</span><strong class="income">${money(income)}</strong></div>
         <div><span class="small muted">Despesas</span><strong class="expense">${money(expense)}</strong></div>
         <div><span class="small muted">Saldo</span><strong>${money(income - expense)}</strong></div></div>
-        <p class="small muted tx-totals-note">Só lançamentos pagos entram nos totais.</p>`;
+        <p class="small muted tx-totals-note">Só lançamentos pagos entram nos totais.${mixed ? ' Contas em outras moedas ficam de fora.' : ''}</p>`;
 }
 
 async function paintTransactions() {
@@ -905,7 +945,7 @@ async function paintTransactions() {
     items.forEach(it => groups.set(it.date, [...(groups.get(it.date) || []), it]));
     box.innerHTML = totalsStrip(items) + [...groups].map(([date, list]) => {
         // the day total only counts what was paid; transfers just move money between accounts
-        const net = list.reduce((a, it) => it.tx && it.tx.status !== 'PENDING' ? a + (it.tx.type === 'INCOME' ? 1 : -1) * Number(it.tx.amount) : a, 0);
+        const net = list.reduce((a, it) => it.tx && it.tx.status !== 'PENDING' && currencyOfAccount(it.tx.accountId) === viewCurrency() ? a + (it.tx.type === 'INCOME' ? 1 : -1) * Number(it.tx.amount) : a, 0);
         return `<div class="day-head"><span>${esc(dayLabel(date))}</span><span>${money(net)}</span></div>
                 <div class="list">${list.map(it => it.tx ? txRow(it.tx) : transferRow(it.transfer)).join('')}</div>`;
     }).join('');
@@ -927,6 +967,10 @@ function finishList(box) {
 
 function renderBudgets() {
     const s = state.summaryAll;
+    const main = currencyCode();
+    const budgetCodes = [...new Set([main, ...state.accounts.map(a => a.currency)])];
+    const currencyChips = budgetCodes.length > 1 ? `<div class="chips">${budgetCodes.map(c =>
+        `<button class="chip ${c === (state.budgetCurrency || main) ? 'active' : ''}" data-bcur="${c}">${esc(c)}</button>`).join('')}</div>` : '';
     const withBudget = s.categories.filter(c => c.budget != null);
     const budgetedIds = new Set(withBudget.map(c => c.categoryId));
     const free = orderedCategories('EXPENSE').filter(c => !budgetedIds.has(c.id));
@@ -968,13 +1012,15 @@ function renderBudgets() {
     }
 
     $('#view').innerHTML = `<div class="stack">
-        ${state.accountFilter ? '<div class="small muted">Os orçamentos consideram os gastos de todas as contas.</div>' : ''}
+        ${currencyChips}
+        ${state.accountFilter || state.currencyFilter ? '<div class="small muted">Os orçamentos consideram os gastos de todas as contas da moeda.</div>' : ''}
         ${totalCard}
         ${withBudget.length ? withBudget.map(card).join('') : `<div class="card empty"><div class="big">${ico('target')}</div>Defina limites mensais por categoria<br>e acompanhe quanto ainda pode gastar.</div>`}
         ${free.length ? `<button class="btn block" id="add-budget">${ico('plus')} Novo orçamento</button>` : ''}
         <p class="small muted center">O limite vale a partir do mês definido e não altera meses anteriores.${s.budgetRollover ? ' A sobra (ou o estouro) de cada mês passa para o seguinte.' : ''}</p>
     </div>`;
     $$('[data-cat]').forEach(b => b.onclick = () => openBudgetSheet(Number(b.dataset.cat)));
+    $$('[data-bcur]').forEach(b => b.onclick = () => { state.budgetCurrency = b.dataset.bcur === currencyCode() ? null : b.dataset.bcur; loadAll({keepScroll: false}); });
     $('#total-budget').onclick = () => openBudgetSheet('total');
     const add = $('#add-budget');
     if (add) add.onclick = () => openBudgetSheet(null);
@@ -1144,7 +1190,9 @@ function openTransactionSheet(item, prefill) {
                 <div class="field"><label for="f-from">De</label><select id="f-from" data-create="account">${accountOptions(fromDefault)}</select></div>
                 <div class="field"><label for="f-to">Para</label><select id="f-to" data-create="account">${accountOptions(toDefault)}</select></div>
             </div>
-            <div data-for="transfer">${tip('transfer', `Transferências entre contas não são receitas nem despesas. Para investir, transfira para a conta onde o dinheiro ficará guardado.`)}</div>
+            <div class="field" data-for="transfer" id="f-toamount-field" hidden><label for="f-toamount" id="f-toamount-label">Valor que chegou</label>
+                <input id="f-toamount" inputmode="numeric" placeholder="0,00" autocomplete="off" value="${isTransfer && item.toAmount != null ? esc(amountFormat().format(Number(item.toAmount))) : ''}"></div>
+            <div data-for="transfer">${tip('transfer', `Transferências entre contas não são receitas nem despesas. Para investir, transfira para a conta onde o dinheiro ficará guardado. Entre moedas diferentes, informe os dois valores.`)}</div>
             ${dateField('f-date', date, 'Data')}
             <div data-for="repeat" hidden>
                 <label class="switch-row"><input type="checkbox" id="f-repeat"><span>Repetir todo mês${info('Pagamentos recorrentes se repetem todo mês. Gerencie em Mais → Pagamentos recorrentes. Com o desconto automático, são pagos no vencimento; sem ele, precisam de confirmação.')}</span></label>
@@ -1184,11 +1232,19 @@ function openTransactionSheet(item, prefill) {
         </form>`);
 
     const dateValue = bindDate(sheet, 'f-date');
+    /** The "amount that arrived" field only shows for a transfer between accounts in different currencies. */
+    function paintToAmount() {
+        const from = Number($('#f-from', sheet).value), to = Number($('#f-to', sheet).value);
+        const different = currencyOfAccount(from) !== currencyOfAccount(to);
+        $('#f-toamount-field', sheet).hidden = !different || mode !== 'TRANSFER';
+        if (different) $('#f-toamount-label', sheet).textContent = T(`Valor que chegou (${currencySymbol(currencyOfAccount(to))})`);
+    }
     const paintMode = () => {
         $$('.seg button', sheet).forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
         const transfer = mode === 'TRANSFER';
         $$('[data-for="tx"]', sheet).forEach(el => { el.hidden = transfer; });
         $$('[data-for="transfer"]', sheet).forEach(el => { el.hidden = !transfer; });
+        paintToAmount();
         $$('[data-for="installments"]', sheet).forEach(el => { el.hidden = editing || mode !== 'EXPENSE' || repeat; });
         $$('[data-for="repeat"]', sheet).forEach(el => { el.hidden = editing || transfer; });
         $$('[data-once]', sheet).forEach(el => { el.hidden = transfer || repeat; }); // a recurring payment has no status, tags or note of its own
@@ -1410,6 +1466,10 @@ function openTransactionSheet(item, prefill) {
     $('#f-date', sheet).addEventListener('input', () => { if (installments() > 1) refreshPlan(); });
     $('#f-account', sheet).addEventListener('change', () => { if (installments() > 1) refreshPlan(); });
     bindAmountInput($('#f-amount', sheet));
+    bindAmountInput($('#f-toamount', sheet));
+    // between accounts in different currencies the person gives both sides (there is no automatic rate)
+    $('#f-from', sheet).addEventListener('change', paintToAmount);
+    $('#f-to', sheet).addEventListener('change', paintToAmount);
     $('#f-amount', sheet).addEventListener('input', paintPlanHints);
     paintMode();
     paintStatus();
@@ -1494,6 +1554,11 @@ function openTransactionSheet(item, prefill) {
             const fromAccountId = Number($('#f-from', sheet).value), toAccountId = Number($('#f-to', sheet).value);
             if (fromAccountId === toAccountId) return toast('Escolha contas diferentes para a origem e o destino.');
             const body = {fromAccountId, toAccountId, amount, date: dateValue(), description: name || null};
+            if (currencyOfAccount(fromAccountId) !== currencyOfAccount(toAccountId)) {
+                const received = parseAmount($('#f-toamount', sheet).value);
+                if (!(received > 0)) return toast('Informe o valor que chegou na conta de destino.');
+                body.toAmount = received;
+            }
             return run(() => api(isTransfer ? `/transfers/${item.id}` : '/transfers', {method: isTransfer ? 'PUT' : 'POST', body}),
                 editing ? 'Transferência atualizada' : 'Transferência salva');
         }
@@ -1591,6 +1656,7 @@ function openCategorySheet(cat, newKind = null) {
  * limit). A limit applies from the viewed month on, or only to that month.
  */
 function openBudgetSheet(target) {
+    const budgetView = state.budgetCurrency || currencyCode();
     const isTotal = target === 'total';
     const s = state.summaryAll;
     const budgeted = new Map(s.categories.filter(c => c.budget != null).map(c => [c.categoryId, c]));
@@ -1603,7 +1669,8 @@ function openBudgetSheet(target) {
         <form id="b-form" novalidate>
             ${isTotal ? '' : `<div class="field"><label for="b-cat">Categoria</label>
                 <select id="b-cat" ${target ? 'disabled' : ''}>${choices.map(c => `<option value="${c.id}">${esc(catLabel(c))}</option>`).join('')}</select></div>`}
-            <div class="field"><label for="b-amount">Limite mensal (${esc(currencySymbol())})</label>
+            <div class="field"><label for="b-currency">Moeda</label><select id="b-currency">${currencyOptions(budgetView)}</select></div>
+            <div class="field"><label for="b-amount" id="b-amount-label">Limite mensal (${esc(currencySymbol())})</label>
                 <input id="b-amount" inputmode="numeric" placeholder="0,00" value="${exists ? esc(amountFormat().format(Number(currentBase))) : ''}"></div>
             <div class="field"><label for="b-scope">Vale para</label>
                 <select id="b-scope"><option value="FROM_MONTH">${esc(monthName)} e os meses seguintes</option><option value="ONLY_MONTH">Só ${esc(monthName)}</option></select>
@@ -1614,6 +1681,7 @@ function openBudgetSheet(target) {
             </div>
         </form>`);
     bindAmountInput($('#b-amount', sheet));
+    $('#b-currency', sheet).onchange = e => { $('#b-amount-label', sheet).textContent = T(`Limite mensal (${currencySymbol(e.target.value)})`); };
     const base = () => isTotal ? '/budgets/total' : `/budgets/${target || Number($('#b-cat', sheet).value)}`;
     if (exists) {
         $('#b-del', sheet).onclick = async () => {
@@ -1625,7 +1693,7 @@ function openBudgetSheet(target) {
         e.preventDefault();
         const amount = parseAmount($('#b-amount', sheet).value);
         if (!(amount > 0)) return toast('Informe um limite maior que zero.');
-        run(() => api(`${base()}?month=${state.month}`, {method: 'PUT', body: {amount, scope: $('#b-scope', sheet).value}}), 'Orçamento salvo');
+        run(() => api(`${base()}?month=${state.month}`, {method: 'PUT', body: {amount, scope: $('#b-scope', sheet).value, currency: $('#b-currency', sheet).value}}), 'Orçamento salvo');
     };
 }
 

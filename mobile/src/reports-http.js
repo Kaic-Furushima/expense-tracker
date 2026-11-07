@@ -16,7 +16,7 @@ export function createReportsHttp({reports}) {
         const format = match[1].toLowerCase();
         if (format !== 'pdf' && format !== 'xlsx') throw new HttpError(404, `Não encontrado: ${path}`);
         const {from, to} = reports.period(query);
-        const data = reports.collect(from, to, query.accountId ? Number(query.accountId) : null);
+        const data = reports.collect(from, to, query.accountId ? Number(query.accountId) : null, query.currency || null);
         return format === 'pdf'
             ? {status: 200, bytes: await statementPdf(reports, data), contentType: 'application/pdf'}
             : {status: 200, bytes: statementXlsx(reports, data), contentType: XLSX};

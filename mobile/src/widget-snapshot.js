@@ -23,18 +23,21 @@ export function buildSnapshot({api, messages, passwordSet, withPassword, now = D
     };
     if (passwordSet && !withPassword) return {v: 1, at: now, blocked: true, texts, balances: [], progress: []};
 
-    const money = value => messages.money(value);
+    const money = (value, currency) => messages.money(value, currency);
     const get = url => api.handle('GET', url).body;
 
     const accounts = get('/accounts').filter(a => !a.archived);
     // o total e o disponivel; o que esta guardado (contas marcadas como "dinheiro guardado") aparece a parte, embaixo
     const sumOf = list => round2(list.reduce((sum, a) => sum + Number(a.balance), 0));
-    const total = sumOf(accounts.filter(a => !a.saved));
-    const savedTotal = sumOf(accounts.filter(a => a.saved));
+    // accounts in another currency do not mix into the total (each one shows its own balance below)
+    const mainCurrency = messages.currency();
+    const inMain = accounts.filter(a => a.currency === mainCurrency);
+    const total = sumOf(inMain.filter(a => !a.saved));
+    const savedTotal = sumOf(inMain.filter(a => a.saved));
     const balances = [
-        {key: 'total', choice: t('Saldo total'), name: t('Saldo total'), main: money(total), sub: accounts.some(a => a.saved) ? t('Guardado: {0}', money(savedTotal)) : '', progress: -1, negative: total < 0},
+        {key: 'total', choice: t('Saldo total'), name: t('Saldo total'), main: money(total), sub: inMain.some(a => a.saved) ? t('Guardado: {0}', money(savedTotal)) : '', progress: -1, negative: total < 0},
         ...accounts.map(a => ({
-            key: `a${a.id}`, choice: a.name, name: a.name, main: money(Number(a.balance)),
+            key: `a${a.id}`, choice: a.name, name: a.name, main: money(Number(a.balance), a.currency),
             sub: a.parentName ? t('dentro de {0}', a.parentName) : '', progress: -1, negative: Number(a.balance) < 0
         }))
     ];

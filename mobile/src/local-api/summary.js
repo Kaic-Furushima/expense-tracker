@@ -26,8 +26,12 @@ export class Summary {
                 categoryId: r.category_id, accountId: r.account_id, cents: r.cents, count: r.n}));
     }
 
-    summarize(month, accountId = null) {
-        const totals = this.totalsBetween(addMonths(month, -ROLLOVER_MAX_MONTHS), month);
+    /** currency: a moeda olhada (a principal, se nao disser); com uma conta, vale a moeda dela. So conta o que e dessa moeda. */
+    summarize(month, accountId = null, currency = null) {
+        const currencies = this.catalog.accountCurrencies();
+        const view = accountId != null ? (currencies.get(accountId) ?? this.catalog.mainCurrency()) : (currency || this.catalog.mainCurrency());
+        const inView = id => currencies.get(id) === view;
+        const totals = this.totalsBetween(addMonths(month, -ROLLOVER_MAX_MONTHS), month).filter(b => inView(b.accountId));
         const spend = spendByMonth(totals);
         const inAccount = b => accountId == null || accountId === b.accountId;
         // "correcao de saldo": nao e receita nem despesa; aparece a parte e entra no saldo do mes
@@ -43,7 +47,7 @@ export class Summary {
         let pendingExpense = sum(scoped, false, false);
         for (const o of this.db.all(`select o.amount_cents, o.status, r.type, r.account_id from recurring_occurrences o
                                      join recurring_payments r on r.id = o.recurring_id where o.occurrence_month = ?`, [month])) {
-            if (o.status !== 'PENDING' || o.amount_cents == null || !(accountId == null || accountId === o.account_id)) continue;
+            if (o.status !== 'PENDING' || o.amount_cents == null || !(accountId == null ? inView(o.account_id) : accountId === o.account_id)) continue;
             if (o.type === 'INCOME') pendingIncome += o.amount_cents;
             else pendingExpense += o.amount_cents;
         }
@@ -51,7 +55,7 @@ export class Summary {
 
         const allCategories = this.db.all('select * from categories');
         const byId = new Map(allCategories.map(c => [c.id, c]));
-        const book = this.budgets.book();
+        const book = this.budgets.book(view);
         const rollover = this.settings.budgetRolloverFrom() != null;
         const rolloverFrom = this.settings.budgetRolloverFrom() ?? month;
         const childrenOf = new Map();
@@ -91,7 +95,7 @@ export class Summary {
 
         const c = fromCents;
         return {
-            month, income: c(income), expense: c(spent), balance: c(balance), adjustment: c(adjustment), previousExpense: c(previousSpent),
+            month, currency: view, income: c(income), expense: c(spent), balance: c(balance), adjustment: c(adjustment), previousExpense: c(previousSpent),
             pendingIncome: c(pendingIncome), pendingExpense: c(pendingExpense), projectedBalance: c(projected),
             totalBudget: c(totalBudget), totalBudgetBase: c(totalBase), totalCarry: c(totalCarry), totalSpent: c(monthSpend.total),
             budgetRollover: rollover,
