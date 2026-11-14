@@ -12,7 +12,7 @@ const ok = (method, url, body) => {
     assert.ok(res.status >= 200 && res.status < 300, `${method} ${url} -> ${res.status} ${JSON.stringify(res.body)}`);
     return res.body;
 };
-const snapshot = (extra = {}) => buildSnapshot({api, messages: api.services.messages, passwordSet: false, withPassword: false, now: 1, ...extra});
+const snapshot = (extra = {}) => buildSnapshot({api, messages: api.services.messages, now: 1, ...extra});
 const norm = text => text.replace(/\s/g, ' ');
 
 beforeEach(() => {
@@ -23,19 +23,6 @@ beforeEach(() => {
 });
 
 describe('resumo dos widgets', () => {
-    it('com senha e a opcao desligada nao leva nenhum valor, so o aviso', () => {
-        const s = snapshot({passwordSet: true, withPassword: false});
-        assert.equal(s.blocked, true);
-        assert.deepEqual([s.balances, s.progress], [[], []]);
-        assert.equal(s.texts.blocked, 'Aplicativo bloqueado por senha. Widgets desativados.');
-        assert.ok(!JSON.stringify(s).includes('1.000') && !JSON.stringify(s).includes('Reserva'));
-    });
-
-    it('com senha e a opcao ligada, ou sem senha, leva os valores', () => {
-        assert.equal(snapshot({passwordSet: true, withPassword: true}).blocked, false);
-        assert.equal(snapshot({passwordSet: false, withPassword: false}).blocked, false);
-    });
-
     it('saldo total e saldo de cada conta (o saldo atual, nao o do mes)', () => {
         const s = snapshot();
         assert.deepEqual(s.balances.map(b => [b.key, b.name, norm(b.main)]), [
@@ -90,8 +77,8 @@ describe('resumo dos widgets', () => {
 
     it('os textos seguem o idioma do app', () => {
         api.services.messages.settings.setLanguage('en');
-        const s = snapshot({passwordSet: true, withPassword: false});
-        assert.equal(s.texts.blocked, 'App locked by password. Widgets disabled.');
+        const s = snapshot();
+        assert.equal(s.texts.missing, 'Item not found. Tap to open the app.');
     });
 });
 

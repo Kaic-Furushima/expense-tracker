@@ -1,6 +1,5 @@
 // O que os widgets da tela inicial mostram. O widget e nativo (Java) e nao enxerga o banco, que fica dentro do WebView:
 // o app monta aqui um resumo ja pronto (textos e valores formatados) e entrega ao Android, que so desenha.
-// Com senha no app e a opcao "mostrar mesmo com senha" desligada, o resumo vai SEM nenhum valor, so o aviso.
 
 const TOTAL_BUDGET = 'b-total';
 
@@ -10,18 +9,14 @@ const percentOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100)
 /**
  * @param api          a API local ({handle(method, url)}) do perfil em uso
  * @param messages     catalogo de textos (t, language)
- * @param passwordSet  se o app tem senha
- * @param withPassword se a pessoa deixou os widgets funcionarem mesmo com senha
  */
-export function buildSnapshot({api, messages, passwordSet, withPassword, dark = false, now = Date.now()}) {
+export function buildSnapshot({api, messages, dark = false, now = Date.now()}) {
     const t = (text, ...args) => messages.t(text, ...args);
     const texts = {
-        blocked: t('Aplicativo bloqueado por senha. Widgets desativados.'),
         missing: t('Item não encontrado. Toque para abrir o app.'),
         add: t('Novo lançamento'),
         open: t('Abra o app para ativar o widget.')
     };
-    if (passwordSet && !withPassword) return {v: 1, at: now, dark, blocked: true, texts, balances: [], progress: []};
 
     const money = (value, currency) => messages.money(value, currency);
     const get = url => api.handle('GET', url).body;
@@ -64,5 +59,5 @@ export function buildSnapshot({api, messages, passwordSet, withPassword, dark = 
             progress: goal > 0 ? Math.min(100, percentOf(saved, goal)) : -1, negative: saved < 0
         });
     }
-    return {v: 1, at: now, dark, blocked: false, texts, balances, progress};
+    return {v: 1, at: now, dark, texts, balances, progress};
 }

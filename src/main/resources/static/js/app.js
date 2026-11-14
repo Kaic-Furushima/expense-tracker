@@ -255,13 +255,6 @@ async function request(path, options) {
         ...options,
         body: options.body ? JSON.stringify(options.body) : undefined
     });
-    if (res.status === 401 && !path.startsWith('/api/auth/')) {
-        // the password is needed (it was set, or the session ended): show the sign-in form instead of the data
-        showLogin();
-        const err = new Error('Entre com a senha.');
-        err.locked = true;
-        throw err;
-    }
     if (res.status === 204) return null;
     const isJson = (res.headers.get('content-type') || '').includes('json');
     const data = isJson ? await res.json() : null;
@@ -478,15 +471,14 @@ async function loadAll({keepScroll = true} = {}) {
         loadReminders();
         consumeWidgetAction();
     } catch (e) {
-        if (e.locked) return; // the sign-in form is on the screen
         $('#view').innerHTML = `<div class="card empty"><div class="big">${ico('wifi-off')}</div>Não foi possível carregar os dados.<br><span class="small">${esc(e.message)}</span><br><br><button class="btn primary" id="retry">Tentar de novo</button></div>`;
         $('#retry').onclick = loadAll;
     }
 }
 
-/** Android: the "+" button of a home-screen widget asks for a new entry; it runs once the app is open (after the password, if any). */
+/** Android: the "+" button of a home-screen widget asks for a new entry; it runs once the app is open. */
 function consumeWidgetAction() {
-    if (!window.nativeWidgets || document.body.classList.contains('locked') || !state.categories.length) return;
+    if (!window.nativeWidgets || !state.categories.length) return;
     if (window.nativeWidgets.takeAction() === 'new') openTransactionSheet(null);
 }
 window.consumeWidgetAction = consumeWidgetAction;
@@ -661,7 +653,6 @@ function renderHome() {
         ? `${thisMonth ? `<div class="hero-note forecast">Previsto no fim do mês: <strong>${money(leftTotal)}</strong> ${pending}</div>` : ''}
         <div class="hero-note forecast">Lucro previsto do mês: <strong>${money(s.projectedBalance)}</strong> ${thisMonth ? '' : pending}</div>`
         : '';
-    const latest = [...state.transactions].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 5);
 
     $('#view').innerHTML = `<div class="home-grid"><div class="stack home-main">
         ${welcomeCard()}
@@ -693,9 +684,6 @@ function renderHome() {
                 <i class="exp" style="height:${(Number(t.expense) / maxTrend) * 100}%"></i></div>
             <span class="m">${esc(shortMonth(t.month))}</span></div>`).join('')}</div>
             <div class="small muted" style="margin-top:8px"><span class="income">●</span> Receitas &nbsp; <span class="expense">●</span> Despesas</div></div>
-        <h2 class="section-title">Últimos adicionados</h2>
-        ${latest.length ? `<div class="list" id="recent">${latest.map(txRow).join('')}</div>`
-            : `<div class="card empty"><div class="big">${ico('receipt')}</div>Nenhum lançamento ainda.<br>Toque em ${ico('plus')} para começar.</div>`}
     </div></div>`;
     bindTxRows($('#view'));
     bindDueRows($('#view'));
@@ -926,8 +914,8 @@ function totalsStrip(items) {
     return `<div class="chart-stats tx-totals">
         <div><span class="small muted">Receitas</span><strong class="income">${money(income)}</strong></div>
         <div><span class="small muted">Despesas</span><strong class="expense">${money(expense)}</strong></div>
-        <div><span class="small muted">Saldo</span><strong>${money(income - expense)}</strong></div></div>
-        <p class="small muted tx-totals-note">Só lançamentos pagos entram nos totais.${mixed ? ' Contas em outras moedas ficam de fora.' : ''}</p>`;
+        <div><span class="small muted">Saldo</span><strong>${money(income - expense)}</strong></div></div>${mixed ? `
+        <p class="small muted tx-totals-note">Contas em outras moedas ficam de fora.</p>` : ''}`;
 }
 
 async function paintTransactions() {
@@ -1051,17 +1039,14 @@ function renderBudgets() {
     } else {
         totalCard = `<button class="card row" style="display:block;width:100%;text-align:left" id="total-budget">
             <span class="small muted">Limite geral do mês</span>
-            <span style="display:block;font-weight:700">Defina quanto pode gastar no total</span>
-            <span class="small muted">Somando todas as categorias. Toque para definir.</span></button>`;
+            <span style="display:block;font-weight:700">Defina quanto pode gastar no total</span></button>`;
     }
 
     $('#view').innerHTML = `<div class="stack">
-        ${currencyChips}
-        ${state.accountFilter || state.currencyFilter ? '<div class="small muted">Os orçamentos consideram os gastos de todas as contas da moeda.</div>' : ''}
-        ${totalCard}
+        ${currencyChips}        ${totalCard}
         ${withBudget.length ? withBudget.map(card).join('') : `<div class="card empty"><div class="big">${ico('target')}</div>Defina limites mensais por categoria<br>e acompanhe quanto ainda pode gastar.</div>`}
-        ${free.length ? `<button class="btn block" id="add-budget">${ico('plus')} Novo orçamento</button>` : ''}
-        <p class="small muted center">O limite vale a partir do mês definido e não altera meses anteriores.${s.budgetRollover ? ' A sobra (ou o estouro) de cada mês passa para o seguinte.' : ''}</p>
+        ${free.length ? `<button class="btn block" id="add-budget">${ico('plus')} Novo orçamento</button>` : ''}${s.budgetRollover ? `
+        <p class="small muted center">A sobra (ou o estouro) de cada mês passa para o seguinte.</p>` : ''}
     </div>`;
     $$('[data-cat]').forEach(b => b.onclick = () => openBudgetSheet(Number(b.dataset.cat)));
     $$('[data-bcur]').forEach(b => b.onclick = () => { state.budgetCurrency = b.dataset.bcur === currencyCode() ? null : b.dataset.bcur; loadAll({keepScroll: false}); });
@@ -1236,7 +1221,7 @@ function openTransactionSheet(item, prefill) {
             </div>
             <div class="field" data-for="transfer" id="f-toamount-field" hidden><label for="f-toamount" id="f-toamount-label">Valor que chegou</label>
                 <input id="f-toamount" inputmode="numeric" placeholder="0,00" autocomplete="off" value="${isTransfer && item.toAmount != null ? esc(amountFormat().format(Number(item.toAmount))) : ''}"></div>
-            <div data-for="transfer">${tip('transfer', `Transferências entre contas não são receitas nem despesas. Para investir, transfira para a conta onde o dinheiro ficará guardado. Entre moedas diferentes, informe os dois valores.`)}</div>
+            <div data-for="transfer"></div>
             ${dateField('f-date', date, 'Data')}
             <div data-for="repeat" hidden>
                 <label class="switch-row"><input type="checkbox" id="f-repeat"><span>Repetir todo mês${info('Pagamentos recorrentes se repetem todo mês. Gerencie em Mais → Pagamentos recorrentes. Com o desconto automático, são pagos no vencimento; sem ele, precisam de confirmação.')}</span></label>
@@ -1761,56 +1746,7 @@ $('#theme-btn').onclick = () => {
 $$('[data-ico]').forEach(el => { el.innerHTML = ico(el.dataset.ico); });
 applyTheme(currentTheme());
 $('#view').innerHTML = '<div class="stack"><div class="skeleton"></div><div class="skeleton"></div></div>';
-startApp();
-
-/* ---------- Password (S2, S3) ----------
-   Off by default. When a password is set, the app shows the sign-in form until the password is typed; the session
-   cookie keeps the user signed in for 30 days (or until the app restarts or the password changes). */
-/** Opens the app: asks for the password first when one is set. The server being unreachable is left to the offline copy. */
-async function startApp() {
-    try {
-        state.security = await (await fetch('/api/auth/status')).json();
-    } catch (e) {
-        state.security = null;
-    }
-    if (state.security && state.security.passwordSet && !state.security.unlocked) return showLogin();
-    loadAll();
-}
-
-function showLogin() {
-    document.body.classList.add('locked');
-    $('#view').innerHTML = `<div class="card login">
-        <div class="login-mark">${ico('wallet')}</div>
-        <h2>Pocketful</h2>
-        <p class="small muted">Digite a senha para abrir.</p>
-        <form id="login-form" novalidate>
-            <div class="field"><label for="login-pass">Senha</label><input id="login-pass" type="password" autocomplete="current-password"></div>
-            <div class="form-actions"><button type="submit" class="btn primary">Entrar</button></div>
-            ${window.localApp ? '<div class="form-actions"><button type="button" class="btn" id="forgot-pass">Esqueci a senha</button></div>' : ''}
-        </form></div>`;
-    const forgot = $('#forgot-pass');
-    if (forgot) forgot.onclick = async () => { // Android app: there is no file to delete, so forgetting means starting over
-        if (!await confirmDialog('Apagar todos os dados e remover a senha? Não é possível desfazer; só um backup externo recupera os dados.', {okLabel: 'Apagar tudo'})) return;
-        try {
-            await api('/api/auth/reset', {method: 'POST', body: {confirm: true}});
-            safeStorage.set('account', '');
-            location.reload();
-        } catch (err) {
-            toast(err.message);
-        }
-    };
-    $('#login-form').onsubmit = async e => {
-        e.preventDefault();
-        try {
-            state.security = await api('/api/auth/login', {method: 'POST', body: {password: $('#login-pass').value}});
-            document.body.classList.remove('locked');
-            loadAll();
-        } catch (err) {
-            toast(err.message);
-        }
-    };
-    $('#login-pass').focus();
-}
+loadAll();
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA is optional */ });

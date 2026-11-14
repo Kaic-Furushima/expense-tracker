@@ -52,9 +52,6 @@ function openProfilePicker() {
 function renderProfilesPage() {
     const p = state.profiles;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Perfis')}
-        <p class="small muted">${window.localApp
-            ? 'Os perfis têm dados separados. A senha vale para todos, mas qualquer pessoa pode trocar de perfil.'
-            : 'Cada perfil tem dados próprios. Não há senha; qualquer pessoa pode trocar de perfil.'}</p>
         <div class="list">${p.profiles.map(x => `<button class="row" data-profile="${x.id}">${profileAvatar(x)}
             <span class="grow"><span class="title">${esc(x.name)}</span>${x.id === p.current ? '<span class="small muted">Em uso agora</span>' : ''}</span>
             <span class="muted">${ico('pencil')}</span></button>`).join('')}

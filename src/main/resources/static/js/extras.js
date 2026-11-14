@@ -327,7 +327,6 @@ async function saveAsTemplate(body) {
 
 function renderTemplatesPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Modelos favoritos')}
-        ${tip('templates', `Use um modelo para preencher o lançamento. Para criar um, preencha os dados e use <strong>Salvar como modelo</strong>.`)}
         <div class="list">${state.templates.length ? state.templates.map(t => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('star')}</span>
             <span class="grow"><span class="title">${esc(t.name)}</span><span class="small muted">${t.type === 'INCOME' ? 'Receita' : 'Despesa'}${t.amount != null ? ' · ' + money(t.amount) : ''}${t.categoryName ? ' · ' + esc(t.categoryName) : ''}${t.accountName ? ' · ' + esc(t.accountName) : ''}</span></span>
             <button class="btn danger" data-del="${t.id}">Excluir</button></div>`).join('')
@@ -448,7 +447,6 @@ function openRemindersSheet() {
             <span class="avatar" style="background:var(--surface-2)">${ico(r.kind === 'BUDGET' ? 'target' : r.kind === 'MONTH_END' ? 'clock' : 'receipt')}</span>
             <span class="grow"><span class="title">${esc(r.title)}</span><span class="small muted">${esc(r.detail)}</span></span></div>`).join('')}</div>`
             : '<div class="card empty"><div class="big">' + ico('check') + '</div>Nada pedindo atenção agora.</div>'}
-        ${tip('reminders', `Avisa sobre contas vencidas ou com vencimento nos próximos ${state.settings.reminderDays} dias, orçamentos acima de 80% e fim do mês. Veja Mais → Configurações.`)}
         ${canNotify && Notification.permission === 'default' ? '<button class="btn block" id="allow-notify">Ativar notificações do navegador</button>' : ''}
         ${canNotify && Notification.permission === 'denied' ? '<p class="small muted">Notificações bloqueadas. Libere nas configurações do site.</p>' : ''}
         <div id="native-notify"></div>

@@ -18,7 +18,6 @@ echo ===================================================
 echo   Pocketful - acesso pela rede local (celular)
 echo   Neste computador: http://localhost:8080
 echo   No celular (mesmo Wi-Fi): use o endereco "rede local" do log
-echo   Recomendado: defina uma senha em Mais -^> Configuracoes.
 echo ===================================================
 echo.
 call "%~dp0mvnw.cmd" spring-boot:run "-Dspring-boot.run.jvmArguments=-Dapp.bind-address=0.0.0.0"

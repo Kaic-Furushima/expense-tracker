@@ -118,7 +118,6 @@ function openInvoicePayment(account, list, index, invoice) {
             <div class="field" id="p-fromamount-field" hidden><label for="p-fromamount" id="p-fromamount-label">Valor que saiu</label>
                 <input id="p-fromamount" inputmode="numeric" placeholder="0,00" autocomplete="off"></div>
             ${dateField('p-date', todayIso(), 'Data do pagamento')}
-            ${tip('invoice-pay', `Pagar a fatura transfere dinheiro da conta para o cartão, sem duplicar despesas. Você pode pagar parcialmente.`)}
             <div class="form-actions"><button type="button" class="btn" id="p-back">Voltar</button><button type="submit" class="btn primary">Pagar</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'p-date');
@@ -175,7 +174,6 @@ async function renderBackupPage() {
                 ${folder.configured ? '<button type="button" class="btn" id="folder-clear">Parar de usar</button>' : ''}</div>
         </div>`;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Backup e restauração')}
-        ${tip('backup', window.localApp ? 'Inclui lançamentos, contas, categorias, orçamentos, metas e configurações. Guarde outra cópia fora do celular.' : 'Inclui lançamentos, contas, categorias, orçamentos, metas e configurações. Guarde outra cópia fora do computador.')}
         <button class="btn primary block" id="make-backup">${ico('shield')} Fazer backup agora</button>
         ${folderBox}
         <h2 class="section-title">Backups guardados</h2>
@@ -469,7 +467,6 @@ function renderImportPage() {
     if (s.accountId == null || !accountById(s.accountId)) s.accountId = defaultAccountId();
     const accounts = activeAccounts();
     $('#view').innerHTML = `<div class="stack">${pageHeader('Importar lançamentos')}
-        ${tip('import', 'Aceita OFX ou CSV com data, descrição e valor. Confira antes de salvar; nada é gravado sem confirmação.')}
         <div class="card stack-tight">
             <div class="field" style="margin:0"><label for="imp-account">Conta que recebe os lançamentos</label>
                 <select id="imp-account">${accountOptions(s.accountId)}</select>

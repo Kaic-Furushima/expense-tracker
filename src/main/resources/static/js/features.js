@@ -243,17 +243,20 @@ function openAccountPicker() {
     const totalsByCode = accountTotalsByCurrency(active);
     const otherCodes = [...totalsByCode.keys()].filter(code => code !== currencyCode());
     const check = ico('check');
+    const ordered = orderedAccounts(active);
     const sheet = openSheet(`<h2>Ver lançamentos de</h2>
         <div class="list">
             <button class="row" data-acc=""><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
                 <span class="grow"><span class="title">Todas as contas</span><span class="small muted">Disponível ${money(available)}${saved ? ` · guardado ${money(saved)}` : ''}</span></span>${state.accountFilter == null && !state.currencyFilter ? check : ''}</button>
             ${otherCodes.map(code => { const t = totalsByCode.get(code); return `<button class="row" data-cur="${code}"><span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
                 <span class="grow"><span class="title">${esc(T('Contas em {}').replace('{}', code))}</span><span class="small muted">${esc(T('Disponível'))} ${esc(money(t.available, code))}${t.hasSaved ? esc(` · ${T('guardado')} ${money(t.saved, code)}`) : ''}</span></span>${state.accountFilter == null && state.currencyFilter === code ? check : ''}</button>`; }).join('')}
-            ${orderedAccounts(active).map(a => `<button class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}" data-hold="account:${a.id}">${avatar(a.icon || 'bank', a.color)}
-                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance, a.currency)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>`).join('')}
+            ${ordered.map(a => `<div class="manual-row" data-id="${a.id}" style="display:flex;align-items:stretch;gap:6px">
+                <button style="flex:1;min-width:0" class="row ${a.parentId ? 'sub-row' : ''}" data-acc="${a.id}" data-hold="account:${a.id}">${avatar(a.icon || 'bank', a.color)}
+                <span class="grow"><span class="title">${esc(a.name)}</span><span class="small muted">${[accountKind(a), money(a.balance, a.currency)].filter(Boolean).map(esc).join(' · ')}</span></span>${a.id === state.accountFilter ? check : ''}</button>
+                <button type="button" class="drag-handle" data-drag="${a.id}" aria-label="Arrastar para mover">${ico('grip')}</button></div>`).join('')}
             <button class="row" id="acc-new"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button>
-        </div>
-        <p class="small muted" style="margin-top:10px">Segure uma conta para editar.</p>`);
+        </div>`);
+    $$('[data-drag]', sheet).forEach(h => bindAccountDrag(h, ordered, openAccountPicker, sheet));
     $('#acc-new', sheet).onclick = () => { closeSheet(); openAccountSheet(null); };
     $$('[data-acc]', sheet).forEach(b => b.onclick = () => {
         state.accountFilter = nextId(b.dataset.acc);
@@ -319,12 +322,11 @@ function openOccurrenceSheet(o) {
         <h2>${esc(o.name)}</h2>
         <p class="small muted sheet-sub">${statusLabel(o)} · ${esc(o.accountName)}${o.paymentMethodName ? ' · ' + esc(o.paymentMethodName) : ''}</p>
         ${paid ? `<div class="notice">${ico('check')} Pago em ${isoToBr(o.paidDate)} — ${moneyOf(o.accountId, o.amount)}</div>
-            ${tip('occ-undo', `Para desfazer, exclua o lançamento em Lançamentos: o pagamento volta a ficar pulado e pode ser reaberto.`)}`
+            `
         : `<form id="occ-form" novalidate>
             <input class="amount-input" id="o-amount" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(o.amount)}" aria-label="Valor">
             ${o.variableAmount ? '<p class="small muted center">Valor variável: informe quanto veio neste mês.</p>' : ''}
             ${dateField('o-date', todayIso(), o.type === 'INCOME' ? 'Data do recebimento' : 'Data do pagamento')}
-            ${tip('occ-early', `Pode ser antes do vencimento — por exemplo, pagar no dia 28 o que vence no dia 30.`)}
             <div class="grid2">
                 <div class="field"><label for="o-account">Conta</label><select id="o-account">${accountOptions(o.accountId)}</select></div>
                 <div class="field"><label for="o-method">Forma de pagamento</label><select id="o-method">${options(state.methods, o.paymentMethodId, {none: '—'})}</select></div>
@@ -364,90 +366,13 @@ function renderMore() {
 const CURRENCY_NAMES = {BRL: 'Real brasileiro (R$)', USD: 'Dólar americano (US$)', EUR: 'Euro (€)', GBP: 'Libra esterlina (£)',
     ARS: 'Peso argentino (AR$)', CLP: 'Peso chileno (CLP)', MXN: 'Peso mexicano (MX$)', JPY: 'Iene japonês (¥)'};
 
-/* ---------- Security (S1–S3) ----------
-   The password is optional and off by default. The card says whether the app can be reached from other devices. */
-function securityCard() {
-    const s = state.security || {};
-    const warning = s.localOnly === false && !s.passwordSet
-        ? `<div class="notice">${ico('shield')} O app aceita conexões da rede (celular). Defina uma senha.</div>` : '';
-    const buttons = s.passwordSet
-        ? `<button class="chip" id="pw-change">Alterar senha</button><button class="chip" id="pw-remove">Remover senha</button><button class="chip" id="pw-logout">Sair</button>`
-        : `<button class="chip active" id="pw-set">Definir senha</button>`;
-    return `<h2 class="section-title">Segurança</h2>
-        <div class="card stack-tight">
-            ${warning}
-            <p><strong>${s.passwordSet ? 'Com senha' : 'Sem senha'}</strong></p>
-            <p class="small muted">${window.localApp
-                ? (s.passwordSet ? 'O app pede a senha ao abrir e ao voltar do segundo plano; vale para todos os perfis.'
-                    : 'Por padrão o app abre direto. Defina uma senha para pedi-la ao abrir.')
-                : (s.passwordSet
-                    ? 'O app pede a senha ao abrir, no computador e no celular.'
-                    : 'Por padrão, o app abre sem senha. Defina uma para exigi-la no computador e no celular.')}</p>
-            <div class="chips">${buttons}</div>
-            <p class="small muted">${window.localApp
-                ? 'A senha bloqueia a abertura, mas não criptografa os dados. Se esquecê-la, “Esqueci a senha” apaga tudo; mantenha backup externo.'
-                : `${s.localOnly === false ? 'Acesso pela rede local: ligado (run.bat celular).' : 'Acesso só neste computador. Para o celular, use run.bat celular.'}
-                Esqueceu a senha? Apague security.properties na pasta de dados para voltar a abrir sem senha.`}</p>
-        </div>`;
-}
-
-/* ---------- Home-screen widgets (Android app only) ----------
-   The widgets cannot ask for the password, so with a password set they only show a notice, unless this is turned on. */
-function widgetsCard() {
-    const w = window.nativeWidgets;
-    if (!w) return '';
-    const locked = state.security && state.security.passwordSet;
-    return `<h2 class="section-title">Widgets</h2>
-        <div class="card stack-tight">
-            <p class="small muted">Para adicionar um widget, segure a tela inicial, toque em Widgets e escolha Pocketful. Há widgets de saldo, orçamento e caixinha.</p>
-            <label class="switch-row"><input type="checkbox" id="widgets-pw" ${w.withPassword() ? 'checked' : ''}>
-                <span><strong>Mostrar os widgets mesmo com senha</strong>
-                ${info('Desligado: widgets ocultos quando há senha. Ligado: mostra saldos sem senha; abrir pelo widget pede a senha.')}</span></label>
-            ${locked ? '' : '<p class="small muted">Widgets já funcionam sem senha; esta opção só vale se você definir uma.</p>'}
-        </div>`;
-}
-
-/** Sets, changes or removes the password. Changing or removing it needs the current one. */
-function openPasswordSheet(mode) {
-    const title = {set: 'Definir senha', change: 'Alterar senha', remove: 'Remover senha'}[mode];
-    const sheet = openSheet(`<h2>${title}</h2>
-        <form id="pwd-form" novalidate>
-            ${mode === 'set' ? '' : '<div class="field"><label for="pwd-current">Senha atual</label><input id="pwd-current" type="password" autocomplete="current-password"></div>'}
-            ${mode === 'remove' ? '<p class="small muted">Sem senha, o app volta a abrir direto, como antes.</p>' : `
-            <div class="field"><label for="pwd-new">Nova senha</label><input id="pwd-new" type="password" autocomplete="new-password" maxlength="72" placeholder="Pelo menos 4 caracteres"></div>
-            <div class="field"><label for="pwd-repeat">Repita a nova senha</label><input id="pwd-repeat" type="password" autocomplete="new-password" maxlength="72"></div>`}
-            <div class="form-actions"><button type="submit" class="btn ${mode === 'remove' ? 'danger' : 'primary'}">${mode === 'remove' ? 'Remover' : 'Salvar'}</button></div>
-        </form>`);
-    $('#pwd-form', sheet).onsubmit = async e => {
-        e.preventDefault();
-        const current = mode === 'set' ? null : $('#pwd-current', sheet).value;
-        let password = '';
-        if (mode !== 'remove') {
-            password = $('#pwd-new', sheet).value;
-            if (password.length < 4) return toast('A senha deve ter pelo menos 4 caracteres.');
-            if (password !== $('#pwd-repeat', sheet).value) return toast('As senhas não são iguais.');
-        }
-        try {
-            state.security = await api('/api/auth/password', {method: 'PUT', body: {current, password}});
-            closeSheet();
-            toast(mode === 'remove' ? 'Senha removida' : 'Senha salva');
-            render();
-        } catch (err) {
-            toast(err.message);
-        }
-    };
-    const first = $('#pwd-current, #pwd-new', sheet);
-    if (first) first.focus();
-}
-
 /** The "Sobre" card: the version, where the data is kept, and on the computer itself a button to open that folder (U14). */
 async function loadAbout() {
     const box = $('#about-box');
     if (!box) return;
     try {
         const info = await api('/api/about');
-        $('#about-version', box).textContent = `versão ${info.version}`;
-        $('#about-folder', box).innerHTML = `<span>Dados guardados em</span> <code>${esc(info.dataFolder)}</code>`;
+        $('#about-version', box).textContent = `v${info.version}`;
         const open = $('#open-data', box);
         open.hidden = window.localApp || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
         open.onclick = async () => {
@@ -470,7 +395,7 @@ async function loadAbout() {
             };
         }
     } catch (e) {
-        $('#about-folder', box).textContent = '';
+        // sem as informações do "Sobre" o bloco fica só com o nome
     }
 }
 
@@ -497,8 +422,7 @@ function renderMoreMenu() {
                 ${info(`O que sobrou (ou estourou) do limite de um mês entra no limite do próximo.${state.settings.budgetRolloverFrom ? ` Contando desde ${esc(monthLabel(state.settings.budgetRolloverFrom))}.` : ' Começa a contar a partir do mês em que for ligado.'}`)}</span></label>
             <div class="field" style="margin:0"><label for="currency">Moeda principal</label>
                 <select id="currency">${Object.entries(CURRENCY_NAMES).map(([code, name]) =>
-                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
-                <span class="small muted">Usada nos totais. Cada conta, caixinha, desejo e orçamento pode ter a sua.</span></div>
+                    `<option value="${code}" ${state.settings.currency === code ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div>
             <div class="field" style="margin:0"><label for="language">Idioma</label>
                 <select id="language">${[['pt', 'Português'], ['en', 'English'], ['es', 'Español']].map(([code, name]) =>
                     `<option value="${code}" ${LANG === code ? 'selected' : ''}>${name}</option>`).join('')}</select></div>
@@ -513,12 +437,7 @@ function renderMoreMenu() {
             <label class="switch-row"><input type="checkbox" id="auto-backup" ${state.settings.autoBackup ? 'checked' : ''}>
                 <span><strong>Backup automático todo dia</strong>
                 ${info(`Faz até um backup por dia enquanto o app está aberto e mantém os sete mais recentes.`)}</span></label>
-            ${state.settings.autoBackup ? '' : tip('no-backup', 'Sem backup automático, você pode perder seus dados.')}
-            <label class="switch-row"><input type="checkbox" id="tips" ${tipsOn() ? 'checked' : ''}>
-                <span><strong>Mostrar dicas</strong>${info('Dicas rápidas aparecem uma vez. Toque em “Entendi” para ocultá-las neste aparelho.')}</span></label>
         </div>
-        ${securityCard()}
-        ${widgetsCard()}
         <h2 class="section-title">Aparência</h2>
         <div class="card"><div class="chips">
             ${[['light', 'sun', 'Claro'], ['dark', 'moon', 'Escuro']].map(([v, i, l]) =>
@@ -531,18 +450,19 @@ function renderMoreMenu() {
             ${menuRow('backup', 'shield', 'Backup e restauração', 'Salvar uma cópia de tudo ou voltar a uma cópia')}
             ${state.sync && state.sync.available ? menuRow('sync', 'repeat', 'Sincronização', state.sync.configured ? `Conectado · última: ${syncWhen(state.sync.lastSyncAt)}` : 'Manter computador e celular com os mesmos dados') : ''}
             <a class="row" id="export-csv" href="/api/export.csv" download style="text-decoration:none;color:inherit"><span class="avatar" style="background:var(--surface-2)">${ico('download')}</span><span class="grow title">Exportar para planilha (CSV)</span></a>
-            <button class="row" id="demo"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Carregar dados de exemplo</span></button>
+            ${window.localApp && !window.debugBuild ? '' : `<button class="row" id="demo"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Carregar dados de exemplo</span></button>`}
             <button class="row" id="wipe"><span class="avatar" style="background:var(--surface-2)">${ico('trash')}</span><span class="grow title expense">Limpar tudo (mover para a lixeira)</span></button>
         </div>
         <h2 class="section-title">Sobre</h2>
         <div class="card about" id="about-box">
-            <p><strong>Pocketful</strong> <span class="small muted" id="about-version"></span></p>
-            <p class="small muted" id="about-folder"></p>
-            ${window.localApp ? '' : `<p class="small muted about-keys"><span><kbd>Ctrl</kbd>+<kbd>N</kbd> novo lançamento</span> · <span><kbd>/</kbd> buscar</span> · <span><kbd>←</kbd><kbd>→</kbd> mudar o mês</span></p>`}
+            <div class="about-brand">
+                <img class="about-logo" src="/icons/icon.svg" alt="" width="64" height="64">
+                <strong class="about-name">Pocketful</strong>
+                <span class="about-version" id="about-version"></span>
+            </div>
             <button class="btn block" id="open-data" hidden>${ico('folder')} Abrir pasta de dados</button>
         </div>
-        ${window.localApp ? '' : '<p class="small muted" style="text-align:center">No celular, abra este endereço no navegador e use “Adicionar à tela inicial”.</p>'}
-        <div class="list"><button class="row" id="about-project"><span class="avatar" style="background:var(--surface-2)">${ico('sparkles')}</span><span class="grow title">Sobre o Projeto</span><span class="muted">${ico('chevron-right')}</span></button></div>
+        <button class="row about-project" id="about-project"><span class="avatar" style="background:var(--primary-soft)">${ico('sparkles')}</span><span class="grow title">Sobre o Projeto</span><span class="muted">${ico('chevron-right')}</span></button>
     </div>`;
     $('#about-project').onclick = openAboutProject;
     $$('[data-sub]').forEach(b => b.onclick = () => { state.sub = b.dataset.sub; render(); window.scrollTo({top: 0}); });
@@ -572,32 +492,10 @@ function renderMoreMenu() {
             toast(err.message);
         }
     };
-    $('#tips').onchange = e => {
-        safeStorage.set('tips', e.target.checked ? '1' : '0');
-        if (e.target.checked) safeStorage.set('tipsSeen', '[]'); // turning them on shows each tip once again
-        toast(e.target.checked ? 'Dicas ligadas' : 'Dicas desligadas');
-    };
     $('#reminders').onchange = e => saveSetting({remindersEnabled: e.target.checked}, e.target.checked ? 'Lembretes ligados' : 'Lembretes desligados', e.target);
     $('#reminder-days').onchange = e => saveSetting({reminderDays: Number(e.target.value)}, 'Antecedência atualizada');
     $$('.chip[data-theme]').forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); render(); });
     $('#report-more').onclick = openReportSheet;
-    const setup = $('#pw-set'), change = $('#pw-change'), remove = $('#pw-remove'), logout = $('#pw-logout');
-    if (setup) setup.onclick = () => openPasswordSheet('set');
-    if (change) change.onclick = () => openPasswordSheet('change');
-    if (remove) remove.onclick = () => openPasswordSheet('remove');
-    if (logout) logout.onclick = async () => {
-        try { await api('/api/auth/logout', {method: 'POST'}); location.reload(); } catch (e) { toast(e.message); }
-    };
-    const widgetsPw = $('#widgets-pw');
-    if (widgetsPw) widgetsPw.onchange = async () => {
-        if (widgetsPw.checked && state.security && state.security.passwordSet
-            && !await confirmDialog('Ativar widgets com saldos? Quem acessar o celular desbloqueado poderá vê-los sem senha.', {okLabel: 'Ligar'})) {
-            widgetsPw.checked = false;
-            return;
-        }
-        await window.nativeWidgets.setWithPassword(widgetsPw.checked);
-        toast(widgetsPw.checked ? 'Widgets ligados mesmo com senha' : 'Widgets desligados quando há senha');
-    };
     loadAbout();
     $('#export-csv').onclick = async e => {
         if (!window.desktop && !window.nativeFiles) return; // browsers handle the download attribute themselves
@@ -610,7 +508,8 @@ function renderMoreMenu() {
             toast(`Não foi possível exportar: ${err.message}`);
         }
     };
-    $('#demo').onclick = async () => {
+    const demo = $('#demo');
+    if (demo) demo.onclick = async () => {
         if (!await confirmDialog('Adicionar dados de exemplo?', {okLabel: 'Adicionar', danger: false})) return;
         await run(() => api('/api/demo-data', {method: 'POST'}), 'Dados de exemplo carregados');
     };
@@ -626,7 +525,6 @@ function renderCategoriesPage() {
     const list = orderedCategories(kind);
     $('#view').innerHTML = `<div class="stack">${pageHeader('Categorias')}
         <div class="seg"><button type="button" data-kind="EXPENSE" class="exp ${kind === 'EXPENSE' ? 'active' : ''}">Despesas</button><button type="button" data-kind="INCOME" class="inc ${kind === 'INCOME' ? 'active' : ''}">Receitas</button></div>
-        ${tip('categories', 'Despesas e receitas têm categorias separadas. Os totais e orçamentos da categoria principal incluem as subcategorias.')}
         <div class="list">${list.map(c => `<button class="row ${c.parentId ? 'sub-row' : ''}" data-cat="${c.id}">
             ${avatar(c.icon, c.color)}<span class="grow title">${esc(c.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-cat"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">${kind === 'INCOME' ? 'Nova categoria de receita' : 'Nova categoria de despesa'}</span></button></div>
@@ -694,14 +592,15 @@ function saveSiblingOrder(ordered, parentId, sibs) {
     const next = ordered.map(a => a.id);
     ordered.map((a, k) => (a.parentId === parentId ? k : -1)).filter(k => k >= 0).forEach((slot, k) => { next[slot] = sibs[k]; });
     safeStorage.set(orderKey(), JSON.stringify(next));
+    safeStorage.set('accountSort', 'manual'); // arranging by hand means the manual order is the one in use
 }
 
 /** The handle of an account in manual order: drag it up or down (or use the arrow keys) to put it somewhere else. */
-function bindAccountDrag(handle, ordered) {
+function bindAccountDrag(handle, ordered, rerender = renderAccountsPage, root = document) {
     const id = Number(handle.dataset.drag);
     const me = ordered.find(a => a.id === id);
     const sibs = ordered.filter(a => a.parentId === me.parentId).map(a => a.id);
-    const rowOf = x => document.querySelector(`.manual-row[data-id="${x}"]`);
+    const rowOf = x => root.querySelector(`.manual-row[data-id="${x}"]`);
     handle.addEventListener('keydown', e => {
         if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
         e.preventDefault();
@@ -710,7 +609,7 @@ function bindAccountDrag(handle, ordered) {
         const next = sibs.slice();
         [next[i], next[j]] = [next[j], next[i]];
         saveSiblingOrder(ordered, me.parentId, next);
-        renderAccountsPage();
+        rerender();
         const again = document.querySelector(`[data-drag="${id}"]`);
         if (again) again.focus();
     });
@@ -741,7 +640,7 @@ function bindAccountDrag(handle, ordered) {
                 next.splice(target, 0, id);
                 saveSiblingOrder(ordered, me.parentId, next);
             }
-            renderAccountsPage();
+            rerender();
         };
         handle.addEventListener('pointermove', onMove);
         handle.addEventListener('pointerup', end);
@@ -773,7 +672,7 @@ function renderAccountsPage() {
             <div class="small muted">Disponível nas contas</div><div style="font-size:1.5rem;font-weight:800">${money(available)}</div>
             ${otherCurrencies.map(([code, t]) => `<div class="small muted" style="margin-top:6px">${esc(code)}: <strong>${money(t.available, code)}</strong>${t.hasSaved ? ` · guardado <strong>${money(t.saved, code)}</strong>` : ''}</div>`).join('')}
             ${saved ? `<div class="small muted" style="margin-top:6px">Guardado dentro das contas (cofrinhos, investimentos): <strong>${money(saved)}</strong> · Total: <strong>${money(available + saved)}</strong></div>` : ''}
-            ${tip('balance', `Saldo = saldo inicial + receitas − despesas + transferências recebidas − enviadas. Só pagamentos feitos entram.`)}</div>
+            </div>
         <div class="list">${ordered.map(a => mode === 'manual' ? manualRow(a) : row(a)).join('')}
             <button class="row" id="new-account"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova conta</span></button></div>
         ${archived.length ? `<h2 class="section-title">Arquivadas</h2><div class="list">${orderedAccounts(archived).map(row).join('')}</div>` : ''}</div>`;
@@ -878,7 +777,6 @@ function openBalanceAdjust(account) {
             <div class="field"><label for="adj-balance">Saldo atual de verdade (${esc(currencySymbol(account.currency))})</label>
                 <input class="amount-input" id="adj-balance" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${fmtInput(account.balance)}"></div>
             <p class="small center" id="adj-diff" aria-live="polite"></p>
-            ${tip('adjust-balance', 'O app registra a diferença como “Correção de saldo”. Se errar, exclua esse lançamento.')}
             <div class="form-actions"><button type="button" class="btn" id="adj-cancel">Voltar</button><button type="submit" class="btn primary">Corrigir</button></div>
         </form>`);
     const field = $('#adj-balance', sheet), diffBox = $('#adj-diff', sheet);
@@ -906,7 +804,6 @@ function openBalanceAdjust(account) {
 /* ---------- Payment methods ---------- */
 function renderMethodsPage() {
     $('#view').innerHTML = `<div class="stack">${pageHeader('Formas de pagamento')}
-        ${tip('methods', `Forma de pagamento indica como pagou (Pix, débito, crédito), independentemente da conta usada.`)}
         <div class="list">${state.methods.map(m => `<button class="row" data-method="${m.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico('credit-card')}</span><span class="grow title">${esc(m.name)}</span><span class="muted">${ico('pencil')}</span></button>`).join('')}
             <button class="row" id="new-method"><span class="avatar" style="background:var(--primary-soft)">${ico('plus')}</span><span class="grow title">Nova forma de pagamento</span></button></div></div>`;
@@ -952,9 +849,6 @@ async function renderRecurringPage() {
     if (state.tab !== 'more' || state.sub !== 'recurring') return; // navigated away while loading
     const month = state.occurrences;
     $('#view').innerHTML = `<div class="stack">${pageHeader('Pagamentos recorrentes')}
-        ${tip('recurring', `Contas e receitas que se repetem todo mês. ${state.settings.autoPayRecurring
-            ? 'Hoje elas são <strong>descontadas automaticamente</strong> no vencimento.'
-            : 'Hoje elas ficam <strong>“A pagar”</strong> até você confirmar (mude em Mais → Configurações).'}`)}
         <h2 class="section-title">${esc(monthLabel(state.month))}</h2>
         ${month.length ? `<div class="list">${month.map(o => `<button class="row" data-occ="${o.id}">
             ${avatar(o.categoryIcon || 'repeat', o.categoryColor)}
@@ -991,7 +885,6 @@ function openRecurringSheet(rule) {
                 <div class="field"><label for="r-day">Dia do mês</label><input id="r-day" type="number" min="1" max="31" inputmode="numeric" value="${rule?.dayOfMonth ?? ''}" placeholder="1 a 31"></div>
             </div>
             <label class="switch-row"><input type="checkbox" id="r-variable" ${rule?.variableAmount ? 'checked' : ''}><span>Valor variável${info(`O valor muda todo mês (luz, água): você informa ao pagar.`)}</span></label>
-            ${tip('recurring-day', `Em meses que não têm esse dia (ex.: 30 em fevereiro), vale o último dia do mês.`)}
             <div class="grid2">
                 <div class="field"><label for="r-account">Conta</label><select id="r-account" data-create="account">${accountOptions(rule?.accountId ?? defaultAccount)}</select></div>
                 <div class="field"><label for="r-method">Forma de pagamento</label><select id="r-method" data-create="method">${options(state.methods, rule?.paymentMethodId, {none: '—'})}</select></div>
@@ -1248,7 +1141,6 @@ function openWishSheet(item) {
             </div>
             <div class="field"><label for="w-url">Link</label><input id="w-url" maxlength="500" placeholder="Opcional" value="${esc(item?.url)}"></div>
             <div class="field"><label for="w-notes">Observação</label><textarea id="w-notes" rows="2" maxlength="255">${esc(item?.notes)}</textarea></div>
-            ${tip('wish-account', `Na lista, o item não pertence a uma conta. Você escolhe a conta ao marcar “Comprei”.`)}
             <div class="form-actions">
                 ${item ? '<button type="button" class="btn danger" id="w-del">Excluir</button>' : ''}
                 ${item && item.status === 'WISHED' ? '<button type="button" class="btn" id="w-discard">Descartar</button>' : ''}
@@ -1366,7 +1258,6 @@ async function renderTrashPage() {
     }
     if (state.tab !== 'more' || state.sub !== 'trash') return; // navigated away while loading
     $('#view').innerHTML = `<div class="stack">${pageHeader('Lixeira')}
-        ${tip('trash', `Itens excluídos ficam na lixeira por 30 dias. Restaurar mantém a data e a conta.`)}
         ${items.length ? `<div class="list">${items.map(i => i.kind === 'EVERYTHING' ? `<div class="row" data-trash="${i.kind}:${i.id}">
             <span class="avatar" style="background:var(--surface-2)">${ico('layers')}</span>
             <span class="grow"><span class="title">${esc(i.title)}</span><span class="small muted">${i.detail.split(' · ').map(part => `<span>${esc(part)}</span>`).join(' · ')}</span><span class="small muted">Limpo em ${dateTimeBr(i.deletedAt)}</span></span>
@@ -1400,16 +1291,9 @@ async function renderTrashPage() {
 }
 
 /* ---------- Short explanations ----------
-   "?" next to a setting: the explanation shows only when asked for. Tips are explanations spread over the screens: off
-   until turned on in Configurações, and each one shows once, with a button to dismiss it for good. */
+   "?" next to a setting: the explanation shows only when asked for. */
 function info(text) {
     return `<button type="button" class="info-btn" aria-label="Saiba mais" aria-expanded="false">?</button><span class="info-text small muted" hidden>${text}</span>`;
-}
-const tipsOn = () => safeStorage.get('tips') === '1';
-const tipsSeen = () => { try { return JSON.parse(safeStorage.get('tipsSeen') || '[]'); } catch (e) { return []; } };
-function tip(id, html) {
-    if (!tipsOn() || tipsSeen().includes(id)) return '';
-    return `<div class="tip" data-tip="${id}"><span class="small muted">${html}</span><button type="button" class="chip" data-tip-ok="${id}">Entendi</button></div>`;
 }
 document.addEventListener('click', e => {
     const button = e.target.closest('.info-btn');
@@ -1419,13 +1303,6 @@ document.addEventListener('click', e => {
         const show = text.hidden;
         text.hidden = !show;
         button.setAttribute('aria-expanded', String(show));
-        return;
-    }
-    const ok = e.target.closest('[data-tip-ok]');
-    if (ok) {
-        safeStorage.set('tipsSeen', JSON.stringify([...tipsSeen(), ok.dataset.tipOk]));
-        const box = ok.closest('.tip');
-        if (box) box.remove();
     }
 });
 

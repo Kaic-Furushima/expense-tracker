@@ -1,5 +1,5 @@
 // Checks of the translation table (lang.js): every entry is well formed, and the fixed messages that the code shows
-// (toast, confirmDialog, tip) have an entry, so they are not left in Portuguese in English or Spanish.
+// (toast, confirmDialog) have an entry, so they are not left in Portuguese in English or Spanish.
 // Run with: node --test src/test/js
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,15 +36,15 @@ test('the same Portuguese text is not translated in two different ways', () => {
     }
 });
 
-test('fixed messages shown by toast, confirmDialog and tip have a translation', () => {
+test('fixed messages shown by toast and confirmDialog have a translation', () => {
     const known = new Set(texts.map(e => e[0]));
     const patterns = texts.filter(e => e[0].includes('{}')).map(e => new RegExp('^' + e[0].split('{}').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*?') + '$', 's'));
     const covered = text => known.has(text) || patterns.some(p => p.test(text));
     const missing = [];
     for (const file of ['app.js', 'features.js', 'extras.js', 'tools.js', 'profiles.js']) {
         const code = fs.readFileSync(path.join(jsDir, file), 'utf8');
-        // a plain quoted text right after the call, e.g. toast('Conta salva') or tip('id', 'Texto…'); templates with ${} are skipped
-        const re = /\b(?:toast|confirmDialog|tip)\((?:'[a-z-]+',\s*)?'((?:[^'\\\n]|\\.)+)'/g;
+        // a plain quoted text right after the call, e.g. toast('Conta salva'); templates with ${} are skipped
+        const re = /\b(?:toast|confirmDialog)\((?:'[a-z-]+',\s*)?'((?:[^'\\\n]|\\.)+)'/g;
         for (let m; (m = re.exec(code));) {
             const text = m[1].replace(/\\'/g, "'");
             if (!/^[a-z-]+$/.test(text) && /\p{L}{3}/u.test(text) && !covered(text)) missing.push(`${file}: ${text}`);

@@ -25,7 +25,7 @@ import {Upcoming} from './upcoming.js';
 import {Wishes} from './wishes.js';
 import {isoDate} from './util.js';
 
-const APP_VERSION = '0.1.0-celular';
+const APP_VERSION = '1.0.0';
 const NOT_YET = 'Este recurso ainda não está disponível no aplicativo do celular.';
 
 /**
@@ -233,8 +233,6 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     r.get('/api/about', () => ({version: APP_VERSION, dataFolder: 'dentro do aplicativo, neste aparelho', startupAvailable: false, startupEnabled: false}));
     r.post('/api/about/open-data-folder', () => { throw new HttpError(403, 'Os dados ficam dentro do aplicativo. Para tirar uma cópia, use o backup.'); });
 
-    // o aparelho e so de quem o segura: sem senha, sem perfis (por enquanto)
-    r.get('/api/auth/status', () => ({passwordSet: false, unlocked: true, localOnly: true}));
     r.get('/profiles', () => profiles(settings));
     r.put('/app/language', ({body}) => { settings.setLanguage(body?.language); return profiles(settings); });
 

@@ -4,8 +4,7 @@ import {buildSnapshot} from './widget-snapshot.js';
 
 // Widgets da tela inicial do Android (so no aplicativo). O widget e nativo e nao enxerga o banco: aqui o app monta o
 // resumo (ver widget-snapshot.js) e o entrega ao plugin "Widgets", que o guarda e redesenha os widgets.
-// - Com senha no app, os widgets ficam desativados (so um aviso) a menos que a pessoa ligue "mostrar mesmo com senha".
-// - O botao "+" do widget abre o app em expensetracker://widget/new: depois da senha (se houver), abre "Novo lancamento".
+// - O botao "+" do widget abre o app em expensetracker://widget/new e abre "Novo lancamento".
 
 /** O app esta no tema escuro agora? (escolha da pessoa; em automatico, o do aparelho) */
 function isDark() {
@@ -15,7 +14,6 @@ function isDark() {
 }
 
 const Widgets = registerPlugin('Widgets');
-const WITH_PASSWORD_KEY = 'widgets-with-password';
 const ACTION_KEY = 'widget-action';
 const LAUNCH_SEEN_KEY = 'widget-launch-seen';
 const NEW_URL = 'expensetracker://widget/new';
@@ -23,20 +21,13 @@ const REFRESH_DELAY_MS = 1500;
 const ACTION_MAX_AGE_MS = 2 * 60 * 1000;
 const ACTION_DELAY_MS = 700;
 
-const local = {
-    get: key => { try { return localStorage.getItem(key); } catch (e) { return null; } },
-    set: (key, value) => { try { localStorage.setItem(key, value); } catch (e) { /* sem armazenamento: usa o padrao */ } }
-};
 const session = {
     get: key => { try { return sessionStorage.getItem(key); } catch (e) { return null; } },
     set: (key, value) => { try { sessionStorage.setItem(key, value); } catch (e) { /* sem armazenamento: a acao se perde */ } },
     remove: key => { try { sessionStorage.removeItem(key); } catch (e) { /* idem */ } }
 };
 
-/** Padrao: DESLIGADO (com senha, os widgets nao mostram nada). */
-const withPassword = () => local.get(WITH_PASSWORD_KEY) === '1';
-
-export function installNativeWidgets({getApi, access}) {
+export function installNativeWidgets({getApi}) {
     if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('Widgets')) return null;
     let timer = null;
 
@@ -44,7 +35,7 @@ export function installNativeWidgets({getApi, access}) {
         try {
             const api = getApi();
             const snapshot = buildSnapshot({
-                api, messages: api.services.messages, passwordSet: access.passwordSet(), withPassword: withPassword(), dark: isDark()
+                api, messages: api.services.messages, dark: isDark()
             });
             await Widgets.update({json: JSON.stringify(snapshot)});
         } catch (e) {
@@ -52,7 +43,7 @@ export function installNativeWidgets({getApi, access}) {
         }
     }
 
-    /** Guarda o pedido do widget para depois da senha: sobrevive a recarregar a pagina (o app tranca depois de um tempo em segundo plano). */
+    /** Guarda o pedido do widget: sobrevive a recarregar a pagina. */
     function remember(url) {
         if (url !== NEW_URL) return false;
         session.set(ACTION_KEY, `new|${Date.now()}`);
@@ -60,14 +51,8 @@ export function installNativeWidgets({getApi, access}) {
     }
 
     const api = {
-        withPassword,
-        passwordSet: () => access.passwordSet(),
-        setWithPassword(on) {
-            local.set(WITH_PASSWORD_KEY, on ? '1' : '0');
-            return refresh();
-        },
         refresh,
-        /** O pedido guardado pelo widget ("new"), se ainda valer; consome. O front-end so chama com o app aberto e destrancado. */
+        /** O pedido guardado pelo widget ("new"), se ainda valer; consome. O front-end so chama com o app aberto. */
         takeAction() {
             const raw = session.get(ACTION_KEY);
             session.remove(ACTION_KEY);
@@ -82,7 +67,7 @@ export function installNativeWidgets({getApi, access}) {
     };
 
     App.addListener('appUrlOpen', ({url}) => {
-        // espera um pouco: se o app estava trancado por tempo em segundo plano, a pagina recarrega e o pedido segue pela senha
+        // espera um pouco: se a pagina recarregar, o pedido guardado segue
         if (remember(url)) setTimeout(() => window.consumeWidgetAction?.(), ACTION_DELAY_MS);
     });
     // app aberto pelo widget (processo novo): o endereco de abertura vale uma vez so por processo

@@ -1,5 +1,4 @@
 import initSqlJs from 'sql.js/dist/sql-wasm-browser.js';
-import {Access} from './access.js';
 import {createBackupHttp} from './backups-http.js';
 import {createReportsHttp} from './reports-http.js';
 import {createApi} from './local-api/index.js';
@@ -19,7 +18,7 @@ import {createRestoreHttp} from './restore-http.js';
 window.localApp = true;
 
 const STATIC_PREFIXES = ['/js/', '/css/', '/icons/', '/sync/'];
-const STATIC_FILES = ['/', '/index.html', '/sw.js', '/manifest.webmanifest', '/flavor.json', '/hub.json'];
+const STATIC_FILES = ['/', '/index.html', '/sw.js', '/manifest.webmanifest', '/flavor.json', '/hub.json', '/debug.json'];
 
 const IDB_NAME = 'expense-tracker';
 const IDB_VERSION = 2;
@@ -28,9 +27,6 @@ const BACKUPS = 'backups';
 const SAVE_DELAY_MS = 400;
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_BACKUP_CHECK_MS = 60 * 60 * 1000;
-/** Voltar para o app depois de tanto tempo em segundo plano pede a senha de novo (so se houver senha). */
-const LOCK_AFTER_BACKGROUND_MS = 5 * 60 * 1000;
-const SESSION_KEY = 'et-session';
 
 function openIdb() {
     return new Promise((resolve, reject) => {
@@ -91,17 +87,13 @@ function scopedBackupStore(base, id) {
     };
 }
 
-const session = {
-    get: () => { try { return sessionStorage.getItem(SESSION_KEY); } catch (e) { return null; } },
-    set: value => { try { sessionStorage.setItem(SESSION_KEY, value); } catch (e) { /* sem armazenamento: pede a senha ao recarregar */ } },
-    clear: () => { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* idem */ } }
-};
-
 async function start() {
     // a versao "sync" do APK traz flavor.json com sync:true; a "offline" nem tem permissao de internet
     // servidor de sync padrao do build (mobile/sync-hub.json, copiado para hub.json); vazio = so "meu proprio projeto"
     const central = await window.fetch('/hub.json').then(r => (r.ok ? r.json() : null)).catch(() => null);
     const syncFlavor = await window.fetch('/flavor.json').then(r => (r.ok ? r.json() : null)).then(j => j?.sync === true).catch(() => false);
+    // so o APK de debug traz debug.json: libera ferramentas de teste (ex.: dados de exemplo) que a versao final nao mostra
+    window.debugBuild = await window.fetch('/debug.json').then(r => (r.ok ? r.json() : null)).then(j => j?.debug === true).catch(() => false);
     const SQL = await initSqlJs({locateFile: file => `/js/${file}`});
     const idb = await openIdb();
     const backupBase = idbBackupStore(idb);
@@ -163,22 +155,9 @@ async function start() {
     }).init();
     const restoreHttp = createRestoreHttp({profiles, sync, backupsFor: (id, runtime) => runtime.backups});
 
-    const access = await new Access({
-        store: {get: () => kvGet(idb, 'password'), set: hash => kvPut(idb, 'password', hash), delete: () => kvDelete(idb, 'password')},
-        session,
-        onReset: () => profiles.wipeAll().then(() => sync.init())
-    }).init();
-
     addEventListener('pagehide', () => profiles.runtime.flush());
-    let hiddenAt = 0;
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-            hiddenAt = Date.now();
-            profiles.runtime.flush();
-        } else if (hiddenAt && access.passwordSet() && Date.now() - hiddenAt > LOCK_AFTER_BACKGROUND_MS) {
-            access.logout();
-            location.reload(); // volta para a tela da senha
-        }
+        if (document.visibilityState === 'hidden') profiles.runtime.flush();
     });
 
     const autoBackup = () => {
@@ -195,14 +174,14 @@ async function start() {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncMaybe(); });
 
     window.expenseTrackerLocal = {
-        profiles, access,
+        profiles,
         get api() { return profiles.runtime.api; },
         get backups() { return profiles.runtime.backups; },
         flush: () => profiles.runtime.flush()
     };
     installNativeNotifications(() => profiles.runtime.api); // so no Android: avisos agendados (do perfil em uso)
-    installNativeWidgets({getApi: () => profiles.runtime.api, access}); // so no Android: widgets da tela inicial
-    return {profiles, access, sync, restoreHttp};
+    installNativeWidgets({getApi: () => profiles.runtime.api}); // so no Android: widgets da tela inicial
+    return {profiles, sync, restoreHttp};
 }
 
 installNativeFiles();
@@ -250,7 +229,7 @@ window.fetch = async function (input, init = {}) {
     const url = new URL(request ? request.url : String(input), location.href);
     if (!isLocalCall(url)) return realFetch(input, init);
 
-    const {profiles, access, sync, restoreHttp} = await ready;
+    const {profiles, sync, restoreHttp} = await ready;
     const method = (init.method || (request && request.method) || 'GET').toUpperCase();
     let body = init.body ?? null;
     if (typeof body === 'string' && body) {
@@ -258,17 +237,13 @@ window.fetch = async function (input, init = {}) {
     }
     let result;
     try {
-        result = await access.handle(method, url.pathname, body);
-        if (!result) {
-            access.guard(); // com senha e sem entrar, nenhuma chamada de dados passa
-            const {api, backups, reportsHttp} = profiles.runtime;
-            result = await profiles.handle(method, url.pathname, body)
-                ?? await createSyncHttp(() => sync).handle(method, url.pathname, body)
-                ?? await restoreHttp.handle(method, url.pathname, body)
-                ?? await backups.handle(method, url.pathname, body)
-                ?? await reportsHttp.handle(method, url.pathname, Object.fromEntries(url.searchParams))
-                ?? api.handle(method, url.pathname + url.search, body);
-        }
+        const {api, backups, reportsHttp} = profiles.runtime;
+        result = await profiles.handle(method, url.pathname, body)
+            ?? await createSyncHttp(() => sync).handle(method, url.pathname, body)
+            ?? await restoreHttp.handle(method, url.pathname, body)
+            ?? await backups.handle(method, url.pathname, body)
+            ?? await reportsHttp.handle(method, url.pathname, Object.fromEntries(url.searchParams))
+            ?? api.handle(method, url.pathname + url.search, body);
     } catch (e) {
         if (e && typeof e.status === 'number') {
             result = {status: e.status, body: {status: e.status, title: e.message, detail: e.message, ...(e.errors ? {errors: e.errors} : {})}};
@@ -282,7 +257,7 @@ window.fetch = async function (input, init = {}) {
         await profiles.runtime.flush();
         if (!url.pathname.startsWith('/api/sync')) sync.notifyChange(); // agenda um sync logo depois de salvar
         if (window.nativeNotifications) window.nativeNotifications.refreshSoon(); // contas e limites mudaram: reagenda os avisos
-        if (window.nativeWidgets) window.nativeWidgets.refreshSoon(); // saldos, senha ou perfil mudaram: atualiza os widgets
+        if (window.nativeWidgets) window.nativeWidgets.refreshSoon(); // saldos ou perfil mudaram: atualiza os widgets
     }
     if (result.bytes !== undefined) {
         return new Response(result.bytes, {status: result.status, headers: {'Content-Type': result.contentType || 'application/octet-stream'}});

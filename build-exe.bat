@@ -21,10 +21,10 @@ if exist "%~dp0target\runtime" rmdir /s /q "%~dp0target\runtime"
 if exist "%~dp0dist" rmdir /s /q "%~dp0dist"
 if exist "%~dp0target\jpackage-input" rmdir /s /q "%~dp0target\jpackage-input"
 mkdir "%~dp0target\jpackage-input"
-copy /y "%~dp0target\expense-tracker-0.0.1-SNAPSHOT.jar" "%~dp0target\jpackage-input\" >nul
-"%JPACKAGE%" --type app-image --name expense-tracker --app-version 0.0.1 --vendor "Kaic F" ^
+copy /y "%~dp0target\expense-tracker-1.0.0.jar" "%~dp0target\jpackage-input\" >nul
+"%JPACKAGE%" --type app-image --name expense-tracker --app-version 1.0.0 --vendor "Kaic F" ^
   --description "Pocketful: controle de gastos pessoais" ^
-  --input "%~dp0target\jpackage-input" --main-jar expense-tracker-0.0.1-SNAPSHOT.jar ^
+  --input "%~dp0target\jpackage-input" --main-jar expense-tracker-1.0.0.jar ^
   --dest "%~dp0dist" --runtime-image "%~dp0target\runtime" ^
   --icon "%~dp0packaging\app.ico" ^
   --java-options "-Dapp.window-mode=true" ^

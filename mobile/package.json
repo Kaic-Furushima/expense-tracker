@@ -11,8 +11,8 @@
     "sync": "npm run build && cap sync android",
     "android:open": "npm run sync && cap open android",
     "android:apk": "npm run android:apk:offline",
-    "android:apk:offline": "npm run sync && cd android && gradlew.bat assembleOfflineDebug",
-    "android:apk:sync": "npm run sync && cd android && gradlew.bat assembleSyncDebug"
+    "android:apk:offline": "npm run sync && cd android && .\\gradlew.bat assembleOfflineDebug",
+    "android:apk:sync": "npm run sync && cd android && .\\gradlew.bat assembleSyncDebug"
   },
   "engines": {
     "node": ">=20"

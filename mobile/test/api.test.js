@@ -46,7 +46,6 @@ describe('primeiro uso', () => {
             '/attachments/counts', '/templates', '/profiles', '/api/settings', '/api/summary?month=2026-05', '/expenses?status=PENDING']) {
             ok('GET', url);
         }
-        assert.equal(ok('GET', '/api/auth/status').unlocked, true);
     });
 });
 

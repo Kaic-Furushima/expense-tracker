@@ -67,7 +67,6 @@ const CATALOG = new Map([
     ['De', ['From', 'De']],
     ['Para', ['To', 'A']],
     // widgets da tela inicial
-    ['Aplicativo bloqueado por senha. Widgets desativados.', ['App locked by password. Widgets disabled.', 'Aplicación bloqueada por contraseña. Widgets desactivados.']],
     ['Item não encontrado. Toque para abrir o app.', ['Item not found. Tap to open the app.', 'Elemento no encontrado. Toca para abrir la app.']],
     ['Novo lançamento', ['New entry', 'Nuevo movimiento']],
     ['Abra o app para ativar o widget.', ['Open the app to activate the widget.', 'Abre la app para activar el widget.']],

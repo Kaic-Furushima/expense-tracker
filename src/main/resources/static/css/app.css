@@ -449,9 +449,12 @@ select { appearance: auto; }
 .welcome p { margin-bottom: 12px; }
 .welcome .list { margin-bottom: 14px; }
 .about p + p { margin-top: 8px; }
+.about-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; text-align: center; }
+.about-logo { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+.about-name { font-size: 1.25rem; letter-spacing: .01em; }
+.about-version { font-size: .8rem; color: var(--muted, inherit); background: var(--surface-2); padding: 2px 10px; border-radius: 999px; }
+.about-project { width: 100%; border-radius: var(--radius, 16px); background: var(--surface); box-shadow: var(--shadow); }
 .about code { font-size: .8rem; word-break: break-all; }
-.about-keys span { white-space: nowrap; }
-kbd { font: inherit; font-size: .75rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
 
 /* ---- busy bar while saving or preparing a file (U12) ---- */
 .busy { position: fixed; z-index: 50; top: 0; left: 0; right: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
@@ -469,26 +472,12 @@ kbd { font: inherit; font-size: .75rem; font-weight: 700; padding: 1px 6px; bord
     .icon-opt { width: 48px; height: 48px; }
 }
 
-/* ---- password (S2): the sign-in form replaces the screens until the password is typed ---- */
-.locked .topbar, .locked .nav, .locked .fab { display: none; }
-.login { max-width: 360px; margin: 40px auto 0; text-align: center; }
-.login h2 { font-size: 1.3rem; margin: 6px 0 4px; }
-.login p { margin-bottom: 16px; }
-.login-mark { color: var(--primary); }
-.login-mark .i { width: 2.6rem; height: 2.6rem; }
-.login .field { text-align: left; }
-.login .form-actions .btn { flex: 1; }
-
 /* On a phone the top bar (month, account, theme) does not fit in one row: the right-hand part moves to a second row. */
 @media (max-width: 480px) { .topbar { flex-wrap: wrap; row-gap: 6px; } }
 
-/* ---- wide screens: the home screen uses two columns and the content may use more width (U13) ---- */
+/* the home screen is one column on every screen size; "Últimos 6 meses" comes last */
 .home-grid { display: flex; flex-direction: column; gap: 14px; }
 .home-main, .home-side { min-width: 0; }
-@media (min-width: 1100px) {
-    .view, .topbar { max-width: 1180px; }
-    .home-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 18px; align-items: start; }
-}
 
 /* ---------- Dropdown próprio (select.js): botão no lugar do <select> e lista em folha ---------- */
 select.pick-native { position: absolute; width: 1px; height: 1px; padding: 0; margin: 0; border: 0; opacity: 0; overflow: hidden; pointer-events: none; }
@@ -518,13 +507,10 @@ details.card > summary { cursor: pointer; }
 .tutorial { padding-left: 1.2rem; margin: .4rem 0; display: grid; gap: .5rem; }
 .tutorial .btn.small { padding: .15rem .6rem; min-height: 0; display: inline-block; }
 
-/* Explanations on demand (?), tips, installment plan, quick create */
+/* Explanations on demand (?), installment plan, quick create */
 .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 8px; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: .72rem; font-weight: 800; vertical-align: middle; border: 1px solid var(--border); }
 .info-text { display: block; margin-top: 4px; }
 .info-text[hidden] { display: none; }
-.tip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: var(--primary-soft); }
-.tip > span { flex: 1; }
-.tip .chip { flex: none; }
 .date-quick { flex-wrap: wrap; }
 .cat-new .avatar { background: var(--surface-2); }
 .plan { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }

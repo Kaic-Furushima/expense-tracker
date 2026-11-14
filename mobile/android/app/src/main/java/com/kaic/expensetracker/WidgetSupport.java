@@ -88,10 +88,10 @@ final class WidgetSupport {
         return value.isEmpty() ? fallback : value;
     }
 
-    /** O que o app listou para este tipo de widget; vazio se bloqueado por senha ou se o app ainda nao enviou nada. */
+    /** O que o app listou para este tipo de widget; vazio se o app ainda nao enviou nada. */
     static JSONArray choices(Context context, String kind) {
         JSONObject snapshot = snapshot(context);
-        if (snapshot == null || snapshot.optBoolean("blocked")) return new JSONArray();
+        if (snapshot == null) return new JSONArray();
         JSONArray items = snapshot.optJSONArray(KIND_PROGRESS.equals(kind) ? "progress" : "balances");
         return items == null ? new JSONArray() : items;
     }
@@ -119,9 +119,6 @@ final class WidgetSupport {
         if (snapshot == null) {
             message = context.getString(R.string.widget_open_app);
             button = false;
-        } else if (snapshot.optBoolean("blocked")) {
-            message = text(snapshot, "blocked", context.getString(R.string.widget_open_app));
-            button = false; // sem valores e sem atalho: com senha, o widget fica desativado
         } else {
             item = find(snapshot.optJSONArray(KIND_PROGRESS.equals(kind) ? "progress" : "balances"), key);
             if (item == null) message = text(snapshot, "missing", context.getString(R.string.widget_open_app));
