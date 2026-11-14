@@ -1,6 +1,6 @@
 {
   "name": "expense-tracker-mobile",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Pocketful para Android: o mesmo front-end, com a lógica rodando no aparelho (SQLite) e sem precisar de servidor.",
   "type": "module",

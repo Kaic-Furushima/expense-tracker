@@ -8,5 +8,5 @@ android/app/src/main/assets/public/
 android/capacitor-cordova-android-plugins/
 android/app/release/
 
-# perfis de baseline gerados a cada build (mudam sempre)
-android/app/*/release/baselineProfiles/
+# saida do build assinado do Android Studio (apk, metadados, perfis de baseline): muda a cada build
+android/app/*/release/
