@@ -42,8 +42,13 @@ export class Recurring {
             dayOfMonth: r.day_of_month, accountId: r.account_id, accountName: r.acc_name,
             paymentMethodId: r.payment_method_id, paymentMethodName: r.pm_name ?? null,
             categoryId: r.category_id, categoryName: r.cat_name ?? null, categoryIcon: r.cat_icon ?? null, categoryColor: r.cat_color ?? null,
-            active: !!r.active, startMonth: r.start_month, endMonth: r.end_month
+            active: !!r.active, startMonth: r.start_month, endMonth: r.end_month, createdCount: this.createdCount(r.id)
         };
+    }
+
+    /** Quantos lancamentos vivos a regra ja criou (ocorrencias pagas cujo lancamento nao esta na lixeira). */
+    createdCount(ruleId) {
+        return this.db.value('select count(*) from recurring_occurrences where recurring_id = ? and expense_id is not null', [ruleId]);
     }
 
     rule(id) {
@@ -84,10 +89,17 @@ export class Recurring {
         });
     }
 
-    /** Excluir a regra apaga as ocorrencias; os lancamentos ja criados por elas ficam. */
-    delete(id) {
+    /**
+     * Excluir a regra apaga as ocorrencias. Os lancamentos ja criados por elas ficam, a menos que `withTransactions`:
+     * eles vao para a lixeira e o valor sai do saldo.
+     */
+    delete(id, withTransactions = false) {
         this.rule(id);
         this.db.tx(() => {
+            if (withTransactions) {
+                const created = this.db.all('select expense_id from recurring_occurrences where recurring_id = ? and expense_id is not null', [id]);
+                for (const row of created) this.expenses.trash(row.expense_id);
+            }
             this.db.run('delete from recurring_occurrences where recurring_id = ?', [id]);
             this.db.run('delete from recurring_payments where id = ?', [id]);
         });
@@ -132,7 +144,7 @@ export class Recurring {
     occurrenceResponse(o) {
         return {
             id: o.id, recurringId: o.recurring_id, name: o.name, type: o.type, month: o.occurrence_month, dueDate: o.due_date,
-            status: o.status, paidDate: o.paid_date, amount: fromCents(o.amount_cents), variableAmount: !!o.variable_amount,
+            status: o.status, paidDate: o.status === 'PAID' ? o.paid_date : null, amount: fromCents(o.amount_cents), variableAmount: !!o.variable_amount,
             expenseId: o.expense_id, accountId: o.account_id, accountName: o.acc_name,
             paymentMethodId: o.payment_method_id, paymentMethodName: o.pm_name ?? null,
             categoryIcon: o.cat_icon ?? null, categoryColor: o.cat_color ?? null
@@ -175,7 +187,8 @@ export class Recurring {
                 const oldest = addMonths(now, -AUTO_PAY_LOOKBACK_MONTHS);
                 const due = this.db.all(`${OCCURRENCE_SELECT} where o.status = 'PENDING' and o.due_date <= ? order by o.due_date, o.id`, [today]);
                 for (const o of due) {
-                    if (o.active && !o.variable_amount && o.occurrence_month >= oldest) this.payRow(o, o.due_date, null, null, null);
+                    // pendente com data de pagamento = desfeita pela pessoa: fica atrasada ate ser paga na mao
+                    if (o.active && !o.variable_amount && o.occurrence_month >= oldest && o.paid_date == null) this.payRow(o, o.due_date, null, null, null);
                 }
             }
         });
@@ -215,6 +228,26 @@ export class Recurring {
         return this.db.tx(() => {
             if (this.occurrence(id).status === 'PAID') throw conflict('Este pagamento já foi feito.');
             this.db.run("update recurring_occurrences set status = 'SKIPPED', updated_at = ? where id = ?", [this.db.now(), id]);
+            return this.occurrenceResponse(this.occurrence(id));
+        });
+    }
+
+    /**
+     * Desfaz um pagamento: o lancamento vai para a lixeira (o valor sai do saldo) e a ocorrencia volta a pendente (atrasada,
+     * se o vencimento ja passou). Com o pagamento automatico ligado e ja vencida ela seria paga de novo na hora; entao
+     * guarda o dia do desfazer como "data de pagamento" enquanto pendente, e o automatico le isso como "nao pague esta"
+     * (nada aparece como pago).
+     */
+    unpay(id) {
+        return this.db.tx(() => {
+            const o = this.occurrence(id);
+            if (o.status !== 'PAID') throw conflict('Este pagamento ainda não foi feito.');
+            // o vencimento segue a regra como ela esta agora (o dia pode ter mudado depois de este ser pago)
+            const due = dueDate(o.occurrence_month, this.rule(o.recurring_id).day_of_month);
+            const paidAgain = this.settings.autoPayRecurring() && o.active && !o.variable_amount && due <= this.today();
+            if (o.expense_id != null) this.expenses.trash(o.expense_id); // solta a ocorrencia (vira "pulada") e manda o lancamento para a lixeira
+            this.db.run("update recurring_occurrences set status = 'PENDING', paid_date = ?, expense_id = null, due_date = ?, amount_cents = ?, updated_at = ? where id = ?",
+                [paidAgain ? this.today() : null, due, o.variable_amount ? null : o.rule_cents, this.db.now(), id]);
             return this.occurrenceResponse(this.occurrence(id));
         });
     }

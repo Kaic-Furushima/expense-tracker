@@ -113,7 +113,7 @@ function openInvoicePayment(account, list, index, invoice) {
         <h2>Pagar fatura</h2>
         <p class="small muted sheet-sub">${esc(account.name)} · ${esc(monthLabel(invoice.month))} · vence em ${isoToBr(invoice.dueDate)}</p>
         <form id="pay-form" novalidate>
-            <input class="amount-input" id="p-amount" inputmode="decimal" autocomplete="off" value="${fmtInput(invoice.remaining)}" aria-label="Valor">
+            <input class="amount-input" id="p-amount" inputmode="numeric" placeholder="0,00" autocomplete="off" value="${moneyText(invoice.remaining)}" aria-label="Valor">
             <div class="field"><label for="p-from">Pagar com a conta</label><select id="p-from">${orderedAccounts(sources).map(a => `<option value="${a.id}" ${a.id === defaultFromAccount(sources) ? 'selected' : ''}>${esc(accountLabel(a))}</option>`).join('')}</select></div>
             <div class="field" id="p-fromamount-field" hidden><label for="p-fromamount" id="p-fromamount-label">Valor que saiu</label>
                 <input id="p-fromamount" inputmode="numeric" placeholder="0,00" autocomplete="off"></div>
@@ -121,6 +121,7 @@ function openInvoicePayment(account, list, index, invoice) {
             <div class="form-actions"><button type="button" class="btn" id="p-back">Voltar</button><button type="submit" class="btn primary">Pagar</button></div>
         </form>`);
     const dateValue = bindDate(sheet, 'p-date');
+    bindAmountInput($('#p-amount', sheet));
     bindAmountInput($('#p-fromamount', sheet));
     // paying from an account in another currency: the invoice value reaches the card, the person says how much left the account
     const paintFromAmount = () => {

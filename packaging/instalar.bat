@@ -6,7 +6,7 @@ rem na Area de Trabalho e no Menu Iniciar. Rodar de novo atualiza. Os dados fica
 
 set "SRC=%~dp0"
 set "DEST=%LOCALAPPDATA%\Pocketful"
-set "JAR=%DEST%\app\expense-tracker-1.0.0.jar"
+set "JAR=%DEST%\app\expense-tracker-1.1.0.jar"
 set "JW=%DEST%\runtime\bin\javaw.exe"
 set "ICO=%DEST%\app\app.ico"
 set "DATA=%APPDATA%\ExpenseTracker"

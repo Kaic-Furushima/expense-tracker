@@ -65,3 +65,23 @@ test('catLabel shows the parent before a subcategory', () => {
     assert.equal(withParents.catLabel({name: 'Solta', parentId: null}), 'Solta');
     assert.equal(withParents.catLabel(null), 'Sem categoria');
 });
+
+test('money fields put the comma in by themselves, as a calculator does', () => {
+    const {bindAmountInput, moneyText} = load(['amountFormat', 'moneyText', 'bindAmountInput']);
+    const typing = (options, ...texts) => {
+        let handler;
+        const input = {value: '', addEventListener: (type, fn) => { handler = fn; }};
+        bindAmountInput(input, options);
+        return texts.map(text => { input.value = text; handler(); return input.value; });
+    };
+    assert.deepEqual(typing(undefined, '1', '12', '123', '1234', '123456'), ['0,01', '0,12', '1,23', '12,34', '1.234,56']);
+    assert.deepEqual(typing(undefined, '12,3', 'abc', ''), ['1,23', '', ''], 'letters are ignored; empty stays empty');
+    assert.deepEqual(typing(undefined, '-5'), ['0,05'], 'a plain amount has no sign');
+    assert.deepEqual(typing({signed: true}, '-', '-1', '-1234', '-0,12-3', '5'), ['-', '-0,01', '-12,34', '-1,23', '0,05'], 'balances may be negative');
+    assert.equal(moneyText(1234.5), '1.234,50');
+    assert.equal(moneyText('12'), '12,00');
+    assert.equal(moneyText(-3.2), '-3,20');
+    assert.equal(moneyText(null), '');
+    assert.equal(moneyText(''), '');
+    assert.equal(helpers.parseAmount(moneyText(-1234.56)), -1234.56, 'what the field shows is read back');
+});

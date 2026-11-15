@@ -21,7 +21,7 @@ if exist "%~dp0target\runtime" rmdir /s /q "%~dp0target\runtime"
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%\app" || exit /b 1
 xcopy /e /i /q /y "%~dp0target\runtime" "%OUT%\runtime" >nul || exit /b 1
-copy /y "%~dp0target\expense-tracker-1.0.0.jar" "%OUT%\app\" >nul || exit /b 1
+copy /y "%~dp0target\expense-tracker-1.1.0.jar" "%OUT%\app\" >nul || exit /b 1
 copy /y "%~dp0packaging\app.ico" "%OUT%\app\" >nul
 copy /y "%~dp0packaging\instalar.bat" "%OUT%\" >nul || exit /b 1
 copy /y "%~dp0packaging\desinstalar.bat" "%OUT%\app\" >nul || exit /b 1

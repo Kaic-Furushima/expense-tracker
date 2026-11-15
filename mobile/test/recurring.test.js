@@ -165,6 +165,89 @@ describe('ocorrencias', () => {
     });
 });
 
+describe('desfazer o pagamento', () => {
+    const balance = () => ok('GET', '/accounts')[0].balance;
+
+    it('manda o lancamento para a lixeira, tira o valor do saldo e a ocorrencia volta a pendente', () => {
+        rule();
+        const o = occurrences('2026-05')[0];
+        const paid = ok('POST', `/recurring/occurrences/${o.id}/pay`, {});
+        assert.equal(balance(), -1000);
+
+        const back = ok('POST', `/recurring/occurrences/${o.id}/unpay`);
+        assert.deepEqual([back.status, back.expenseId, back.paidDate, back.amount], ['PENDING', null, null, 1000]);
+        assert.equal(balance(), 0);
+        assert.equal(ok('GET', '/expenses').length, 0);
+        assert.equal(call('GET', `/expenses/${paid.expenseId}`).status, 404);
+        assert.equal(call('POST', `/recurring/occurrences/${o.id}/unpay`).status, 409); // nada mais a desfazer
+        assert.equal(call('POST', '/recurring/occurrences/999/unpay').status, 404);
+        // e da para pagar de novo
+        assert.equal(ok('POST', `/recurring/occurrences/${o.id}/pay`, {}).status, 'PAID');
+        assert.equal(balance(), -1000);
+    });
+
+    it('um valor variavel volta a pedir o valor', () => {
+        rule({name: 'Luz', variableAmount: true, amount: undefined});
+        const o = occurrences('2026-05')[0];
+        ok('POST', `/recurring/occurrences/${o.id}/pay`, {amount: 87.3});
+        const back = ok('POST', `/recurring/occurrences/${o.id}/unpay`);
+        assert.deepEqual([back.status, back.amount], ['PENDING', null]);
+    });
+
+    it('com o automatico ligado e o vencimento passado fica pendente (atrasada) e o automatico nao paga de novo', () => {
+        rule({dayOfMonth: 1});
+        ok('PUT', '/api/settings', {autoPayRecurring: true});
+        const o = occurrences('2026-05')[0];
+        assert.equal(o.status, 'PAID');
+        const back = ok('POST', `/recurring/occurrences/${o.id}/unpay`);
+        assert.deepEqual([back.status, back.paidDate, back.dueDate], ['PENDING', null, '2026-05-01']);
+        assert.equal(occurrences('2026-05')[0].status, 'PENDING'); // continua atrasada, nao e paga sozinha
+        assert.equal(balance(), 0);
+        assert.equal(ok('GET', '/expenses').length, 0);
+        // paga na mao quando quiser
+        assert.equal(ok('POST', `/recurring/occurrences/${o.id}/pay`, {}).status, 'PAID');
+        assert.equal(balance(), -1000);
+    });
+
+    it('com o automatico ligado e o vencimento ainda por vir, volta a pendente', () => {
+        rule({dayOfMonth: 20});
+        ok('PUT', '/api/settings', {autoPayRecurring: true});
+        const o = occurrences('2026-05')[0];
+        ok('POST', `/recurring/occurrences/${o.id}/pay`, {});
+        assert.equal(ok('POST', `/recurring/occurrences/${o.id}/unpay`).status, 'PENDING');
+        assert.equal(occurrences('2026-05')[0].status, 'PENDING'); // o vencimento (dia 20) ainda nao chegou
+    });
+
+    it('regra criada no proprio dia de vencimento e paga sozinha: mudar o dia e desfazer deixa pendente no dia novo', () => {
+        const r = rule({name: 'Criada hoje', dayOfMonth: 15}); // hoje e dia 15
+        ok('PUT', '/api/settings', {autoPayRecurring: true});
+        const paid = occurrences('2026-05').find(x => x.name === 'Criada hoje');
+        assert.deepEqual([paid.status, paid.paidDate], ['PAID', '2026-05-15']);
+        ok('PUT', `/recurring/${r.id}`, {...r, dayOfMonth: 18}); // uma ocorrencia paga nao muda com a regra
+        assert.equal(occurrences('2026-05').find(x => x.name === 'Criada hoje').dueDate, '2026-05-15');
+
+        const back = ok('POST', `/recurring/occurrences/${paid.id}/unpay`);
+        assert.deepEqual([back.status, back.dueDate], ['PENDING', '2026-05-18']);
+        assert.equal(balance(), 0);
+        assert.equal(occurrences('2026-05').find(x => x.name === 'Criada hoje').status, 'PENDING'); // o automatico espera o dia 18
+    });
+
+    it('excluir a regra pode levar junto os lancamentos que ela criou', () => {
+        const keep = rule({name: 'Fica'});
+        const gone = rule({name: 'Some', amount: 70});
+        occurrences('2026-05').forEach(o => ok('POST', `/recurring/occurrences/${o.id}/pay`, {}));
+        assert.equal(balance(), -1070);
+        assert.deepEqual(ok('GET', '/recurring').map(r => [r.name, r.createdCount]), [['Fica', 1], ['Some', 1]]);
+
+        assert.equal(call('DELETE', `/recurring/${keep.id}`).status, 204); // padrao: o lancamento fica
+        assert.equal(balance(), -1070);
+        assert.equal(call('DELETE', `/recurring/${gone.id}?withTransactions=true`).status, 204);
+        assert.equal(balance(), -1000);
+        assert.equal(ok('GET', '/expenses').length, 1);
+        assert.equal(ok('GET', '/recurring').length, 0);
+    });
+});
+
 describe('pagamento automatico', () => {
     it('paga o que venceu (mes atual e anterior), nao o variavel, o inativo nem os muito antigos', () => {
         rule({name: 'Fixa venceu', dayOfMonth: 10, startMonth: '2026-03'});
@@ -187,6 +270,14 @@ describe('pagamento automatico', () => {
         // chamar de novo nao duplica
         occurrences('2026-05');
         assert.equal(ok('GET', '/expenses?q=Fixa venceu').length, 2);
+    });
+
+    it('nao paga antes do vencimento (dia 18 no dia 15 continua pendente)', () => {
+        rule({name: 'Conta do dia 18', dayOfMonth: 18, startMonth: '2026-05'});
+        ok('PUT', '/api/settings', {autoPayRecurring: true});
+        const o = occurrences('2026-05').find(x => x.name === 'Conta do dia 18');
+        assert.deepEqual([o.status, o.dueDate], ['PENDING', '2026-05-18']);
+        assert.equal(ok('GET', '/expenses').length, 0);
     });
 
     it('desligado, nada e pago sozinho', () => {

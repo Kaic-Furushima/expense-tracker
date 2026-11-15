@@ -326,12 +326,18 @@ async function saveAsTemplate(body) {
 }
 
 function renderTemplatesPage() {
-    $('#view').innerHTML = `<div class="stack">${pageHeader('Modelos favoritos')}
-        <div class="list">${state.templates.length ? state.templates.map(t => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('star')}</span>
+    const arr = arrangeList('templates', state.templates, {value: t => t.amount});
+    const tplRow = t => `<div class="row static"><span class="avatar" style="background:var(--surface-2)">${ico('star')}</span>
             <span class="grow"><span class="title">${esc(t.name)}</span><span class="small muted">${t.type === 'INCOME' ? 'Receita' : 'Despesa'}${t.amount != null ? ' · ' + money(t.amount) : ''}${t.categoryName ? ' · ' + esc(t.categoryName) : ''}${t.accountName ? ' · ' + esc(t.accountName) : ''}</span></span>
-            <button class="btn danger" data-del="${t.id}">Excluir</button></div>`).join('')
+            <button class="btn danger" data-del="${t.id}">Excluir</button></div>`;
+    $('#view').innerHTML = `<div class="stack">${pageHeader('Modelos favoritos')}
+        ${sortBar('templates', arr.mode, arr.items.length)}
+        <div class="list" data-order-list="templates">${arr.items.length ? arr.items.map(t => (arr.mode === 'manual' ? manualWrap(t.id, tplRow(t), 'templates') : tplRow(t))).join('')
             : '<div class="card empty"><div class="big">' + ico('star') + '</div>Nenhum modelo ainda.</div>'}</div></div>`;
     bindBack();
+    const tplIds = arr.items.map(t => t.id);
+    bindSortBar('templates', tplIds, renderTemplatesPage);
+    bindManual('templates', $('[data-order-list="templates"]'), tplIds, tplIds, renderTemplatesPage);
     $$('[data-del]').forEach(b => b.onclick = async () => {
         if (!await confirmDialog('Excluir este modelo? Os lançamentos já feitos não mudam.', {okLabel: 'Excluir'})) return;
         try { await api(`/templates/${b.dataset.del}`, {method: 'DELETE'}); state.templates = await api('/templates'); renderTemplatesPage(); } catch (e) { toast(e.message); }

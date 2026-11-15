@@ -94,9 +94,31 @@ public class RecurringService {
         return saved;
     }
 
+    /** How many live transactions this rule has created (paid occurrences whose transaction is not in the trash). */
+    public long createdCount(RecurringPayment payment) {
+        return occurrences.countByRecurringAndExpenseIsNotNull(payment);
+    }
+
     /** Deleting the rule removes its occurrences; transactions already created from them stay. */
     @Transactional
     public void delete(Long id) {
+        delete(id, false);
+    }
+
+    /**
+     * Deletes the rule and its occurrences. With {@code withTransactions}, the transactions it already created also go
+     * to the trash, so their amounts leave the balance (otherwise they stay as ordinary transactions).
+     */
+    @Transactional
+    public void delete(Long id, boolean withTransactions) {
+        getOrThrow(id);
+        if (withTransactions) {
+            List<Long> created = occurrences.findByRecurring(getOrThrow(id)).stream()
+                    .filter(o -> o.getExpense() != null)
+                    .map(o -> o.getExpense().getId())
+                    .toList();
+            created.forEach(expenseService::deleteById);
+        }
         RecurringPayment payment = getOrThrow(id);
         occurrences.deleteByRecurring(payment);
         payments.delete(payment);
@@ -137,7 +159,8 @@ public class RecurringService {
             for (RecurringOccurrence o : occurrences.findByStatusAndDueDateLessThanEqual(OccurrenceStatus.PENDING, today)) {
                 RecurringPayment p = o.getRecurring();
                 boolean recent = !YearMonth.parse(o.getMonth()).isBefore(oldest);
-                if (p.isActive() && !p.isVariableAmount() && recent) {
+                // a pending occurrence that carries a paid date was undone by the user: it stays overdue until paid by hand
+                if (p.isActive() && !p.isVariableAmount() && recent && o.getPaidDate() == null) {
                     pay(o, o.getDueDate(), null, null, null);
                 }
             }
@@ -166,6 +189,36 @@ public class RecurringService {
         }
         occurrence.setStatus(OccurrenceStatus.SKIPPED);
         return occurrences.save(occurrence);
+    }
+
+    /**
+     * Takes a payment back: its transaction goes to the trash (so the amount leaves the balance) and the occurrence is
+     * pending again (overdue, if the due date has passed). If automatic payment is on and it is already due, it would be
+     * paid again at once, so it is marked to be left alone: it keeps the day it was undone as a "paid date" while
+     * pending, which automatic payment reads as "do not pay this one" (nothing is shown as paid).
+     */
+    @Transactional
+    public RecurringOccurrence unpay(Long occurrenceId) {
+        RecurringOccurrence occurrence = getOccurrence(occurrenceId);
+        if (occurrence.getStatus() != OccurrenceStatus.PAID) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este pagamento ainda não foi feito.");
+        }
+        RecurringPayment rule = occurrence.getRecurring();
+        Expense expense = occurrence.getExpense();
+        // the due date follows the rule as it is now (the day may have been changed after this one was paid)
+        LocalDate due = dueDate(YearMonth.parse(occurrence.getMonth()), rule.getDayOfMonth());
+        LocalDate today = LocalDate.now(clock);
+        boolean paidAgain = settings.autoPayRecurring() && rule.isActive() && !rule.isVariableAmount() && !due.isAfter(today);
+        occurrence.setDueDate(due);
+        occurrence.setStatus(OccurrenceStatus.PENDING);
+        occurrence.setPaidDate(paidAgain ? today : null);
+        occurrence.setExpense(null);
+        occurrence.setAmount(rule.isVariableAmount() ? null : rule.getAmount());
+        occurrences.save(occurrence);
+        if (expense != null) {
+            expenseService.deleteById(expense.getId());
+        }
+        return getOccurrence(occurrenceId);
     }
 
     @Transactional

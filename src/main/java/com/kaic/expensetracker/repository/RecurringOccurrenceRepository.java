@@ -18,6 +18,8 @@ public interface RecurringOccurrenceRepository extends JpaRepository<RecurringOc
 
     boolean existsByRecurringAndMonth(RecurringPayment recurring, String month);
 
+    long countByRecurringAndExpenseIsNotNull(RecurringPayment recurring);
+
     List<RecurringOccurrence> findByStatusAndDueDateLessThanEqual(OccurrenceStatus status, LocalDate date);
 
     void deleteByRecurring(RecurringPayment recurring);

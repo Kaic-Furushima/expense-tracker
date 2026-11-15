@@ -25,7 +25,7 @@ import {Upcoming} from './upcoming.js';
 import {Wishes} from './wishes.js';
 import {isoDate} from './util.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const NOT_YET = 'Este recurso ainda não está disponível no aplicativo do celular.';
 
 /**
@@ -134,9 +134,10 @@ function registerRoutes(r, {db, settings, catalog, expenses, transfers, invoices
     r.get('/recurring/occurrences', ({query}) => recurring.occurrencesOf(query.month || thisMonth(db)));
     r.post('/recurring/occurrences/:id/pay', ({params, body}) => recurring.pay(Number(params.id), body ?? {}));
     r.post('/recurring/occurrences/:id/skip', ({params}) => recurring.skip(Number(params.id)));
+    r.post('/recurring/occurrences/:id/unpay', ({params}) => recurring.unpay(Number(params.id)));
     r.post('/recurring/occurrences/:id/reopen', ({params}) => recurring.reopen(Number(params.id)));
     r.put('/recurring/:id', ({params, body}) => recurring.update(Number(params.id), body ?? {}));
-    r.delete('/recurring/:id', ({params}) => recurring.delete(Number(params.id)));
+    r.delete('/recurring/:id', ({params, query}) => recurring.delete(Number(params.id), query.withTransactions === 'true'));
 
     // importacao de extratos (OFX, CSV de banco ou CSV do app)
     r.post('/import/preview', ({body}) => importer.preview(body?.content, body?.accountId ?? null, body?.invertSigns === true));

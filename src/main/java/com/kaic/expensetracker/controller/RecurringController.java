@@ -43,24 +43,28 @@ public class RecurringController {
 
     @GetMapping
     public List<RecurringResponse> getAll() {
-        return service.findAll().stream().map(RecurringResponse::fromEntity).toList();
+        return service.findAll().stream().map(this::respond).toList();
     }
 
     @PostMapping
     public ResponseEntity<RecurringResponse> create(@Valid @RequestBody RecurringRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(RecurringResponse.fromEntity(service.create(request.toDraft())));
+                .body(respond(service.create(request.toDraft())));
     }
 
     @PutMapping("/{id}")
     public RecurringResponse update(@PathVariable Long id, @Valid @RequestBody RecurringRequest request) {
-        return RecurringResponse.fromEntity(service.update(id, request.toDraft()));
+        return respond(service.update(id, request.toDraft()));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable Long id) {
-        service.delete(id);
+    public void delete(@PathVariable Long id, @RequestParam(required = false, defaultValue = "false") boolean withTransactions) {
+        service.delete(id, withTransactions);
+    }
+
+    private RecurringResponse respond(RecurringPayment payment) {
+        return RecurringResponse.fromEntity(payment, service.createdCount(payment));
     }
 
     /** What is due in a month (default: the current one), including what was already paid or skipped. */
@@ -81,6 +85,12 @@ public class RecurringController {
     @PostMapping("/occurrences/{id}/skip")
     public OccurrenceResponse skip(@PathVariable Long id) {
         return OccurrenceResponse.fromEntity(service.skip(id));
+    }
+
+    /** Takes a payment back: the transaction goes to the trash and the occurrence is pending again. */
+    @PostMapping("/occurrences/{id}/unpay")
+    public OccurrenceResponse unpay(@PathVariable Long id) {
+        return OccurrenceResponse.fromEntity(service.unpay(id));
     }
 
     @PostMapping("/occurrences/{id}/reopen")
@@ -118,8 +128,8 @@ public class RecurringController {
                                     int dayOfMonth, Long accountId, String accountName, Long paymentMethodId,
                                     String paymentMethodName, Long categoryId, String categoryName, String categoryIcon,
                                     String categoryColor, boolean active,
-                                    String startMonth, String endMonth) {
-        static RecurringResponse fromEntity(RecurringPayment p) {
+                                    String startMonth, String endMonth, long createdCount) {
+        static RecurringResponse fromEntity(RecurringPayment p, long createdCount) {
             return new RecurringResponse(p.getId(), p.getName(), p.getType(), p.getAmount(), p.isVariableAmount(),
                     p.getDayOfMonth(), p.getAccount().getId(), p.getAccount().getName(),
                     p.getPaymentMethod() == null ? null : p.getPaymentMethod().getId(),
@@ -128,7 +138,7 @@ public class RecurringController {
                     p.getCategory() == null ? null : p.getCategory().getName(),
                     p.getCategory() == null ? null : p.getCategory().getIcon(),
                     p.getCategory() == null ? null : p.getCategory().getColor(),
-                    p.isActive(), p.getStartMonth(), p.getEndMonth());
+                    p.isActive(), p.getStartMonth(), p.getEndMonth(), createdCount);
         }
     }
 
@@ -139,7 +149,7 @@ public class RecurringController {
         static OccurrenceResponse fromEntity(RecurringOccurrence o) {
             RecurringPayment p = o.getRecurring();
             return new OccurrenceResponse(o.getId(), p.getId(), p.getName(), p.getType(), o.getMonth(), o.getDueDate(),
-                    o.getStatus(), o.getPaidDate(), o.getAmount(), p.isVariableAmount(),
+                    o.getStatus(), o.getStatus() == OccurrenceStatus.PAID ? o.getPaidDate() : null, o.getAmount(), p.isVariableAmount(),
                     o.getExpense() == null ? null : o.getExpense().getId(),
                     p.getAccount().getId(), p.getAccount().getName(),
                     p.getPaymentMethod() == null ? null : p.getPaymentMethod().getId(),

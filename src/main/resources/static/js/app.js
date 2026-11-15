@@ -126,10 +126,14 @@ const safeStorage = {
    The amount is typed by digits, as on a calculator: "1234" shows "12,34" and "123456" shows "1.234,56" (in the
    language's own separators). parseAmount() reads the same text back. */
 const amountFormat = () => new Intl.NumberFormat(LOCALE, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-function bindAmountInput(input) {
+/** A stored amount shown the way the money fields type it ("1234.5" -> "1.234,50"); empty when there is none. */
+const moneyText = v => (v == null || v === '' || Number.isNaN(Number(v)) ? '' : amountFormat().format(Number(v)));
+/** With `signed`, a minus typed anywhere makes the amount negative (balances can be below zero). */
+function bindAmountInput(input, {signed = false} = {}) {
     input.addEventListener('input', () => {
+        const negative = signed && /[-−]/.test(input.value);
         const digits = input.value.replace(/\D/g, '').slice(0, 12);
-        input.value = digits ? amountFormat().format(Number(digits) / 100) : '';
+        input.value = digits ? (negative ? '-' : '') + amountFormat().format(Number(digits) / 100) : (negative ? '-' : '');
     });
 }
 
@@ -836,8 +840,8 @@ function renderTransactions() {
                     `<option value="${m.id}" ${String(m.id) === String(f.methodId) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
             </div>
             <div class="grid2">
-                <div class="field"><label for="fl-min">Valor mínimo</label><input id="fl-min" inputmode="decimal" placeholder="0,00" value="${esc(f.min)}"></div>
-                <div class="field"><label for="fl-max">Valor máximo</label><input id="fl-max" inputmode="decimal" placeholder="sem limite" value="${esc(f.max)}"></div>
+                <div class="field"><label for="fl-min">Valor mínimo</label><input id="fl-min" inputmode="numeric" placeholder="0,00" autocomplete="off" value="${esc(f.min)}"></div>
+                <div class="field"><label for="fl-max">Valor máximo</label><input id="fl-max" inputmode="numeric" placeholder="sem limite" autocomplete="off" value="${esc(f.max)}"></div>
             </div>
             <div class="grid2">${dateField('fl-from', f.from, 'Período: de', true)}${dateField('fl-to', f.to, 'até', true)}</div>
             <div class="field"><label for="fl-sort">Ordenar por</label><select id="fl-sort">${SORTS.map(([v, l]) =>
@@ -859,6 +863,8 @@ function renderTransactions() {
         const refresh = () => soonRefresh();
         $('#fl-cat').onchange = e => { f.categoryId = e.target.value; refresh(); };
         $('#fl-method').onchange = e => { f.methodId = e.target.value; refresh(); };
+        bindAmountInput($('#fl-min'));
+        bindAmountInput($('#fl-max'));
         $('#fl-min').oninput = e => { f.min = e.target.value; refresh(); };
         $('#fl-max').oninput = e => { f.max = e.target.value; refresh(); };
         $('#fl-sort').onchange = e => { f.sort = e.target.value; refresh(); };
@@ -1003,7 +1009,9 @@ function renderBudgets() {
     const budgetCodes = [...new Set([main, ...state.accounts.map(a => a.currency)])];
     const currencyChips = budgetCodes.length > 1 ? `<div class="chips">${budgetCodes.map(c =>
         `<button class="chip ${c === (state.budgetCurrency || main) ? 'active' : ''}" data-bcur="${c}">${esc(c)}</button>`).join('')}</div>` : '';
-    const withBudget = s.categories.filter(c => c.budget != null);
+    // "Valor" of a budget: its monthly limit
+    const budgetArr = arrangeList('budgets', s.categories.filter(c => c.budget != null), {value: c => c.budget, id: c => c.categoryId});
+    const withBudget = budgetArr.items;
     const budgetedIds = new Set(withBudget.map(c => c.categoryId));
     const free = orderedCategories('EXPENSE').filter(c => !budgetedIds.has(c.id));
     const carryText = c => {
@@ -1044,10 +1052,14 @@ function renderBudgets() {
 
     $('#view').innerHTML = `<div class="stack">
         ${currencyChips}        ${totalCard}
-        ${withBudget.length ? withBudget.map(card).join('') : `<div class="card empty"><div class="big">${ico('target')}</div>Defina limites mensais por categoria<br>e acompanhe quanto ainda pode gastar.</div>`}
+        ${sortBar('budgets', budgetArr.mode, withBudget.length)}
+        ${withBudget.length ? `<div class="stack" data-order-list="budgets">${withBudget.map(c => (budgetArr.mode === 'manual' ? manualWrap(c.categoryId, card(c), 'budgets') : card(c))).join('')}</div>` : `<div class="card empty"><div class="big">${ico('target')}</div>Defina limites mensais por categoria<br>e acompanhe quanto ainda pode gastar.</div>`}
         ${free.length ? `<button class="btn block" id="add-budget">${ico('plus')} Novo orçamento</button>` : ''}${s.budgetRollover ? `
         <p class="small muted center">A sobra (ou o estouro) de cada mês passa para o seguinte.</p>` : ''}
     </div>`;
+    const budgetIds = withBudget.map(c => c.categoryId);
+    bindSortBar('budgets', budgetIds, renderBudgets);
+    bindManual('budgets', $('[data-order-list="budgets"]'), budgetIds, budgetIds, renderBudgets);
     $$('[data-cat]').forEach(b => b.onclick = () => openBudgetSheet(Number(b.dataset.cat)));
     $$('[data-bcur]').forEach(b => b.onclick = () => { state.budgetCurrency = b.dataset.bcur === currencyCode() ? null : b.dataset.bcur; loadAll({keepScroll: false}); });
     $('#total-budget').onclick = () => openBudgetSheet('total');
@@ -1057,24 +1069,30 @@ function renderBudgets() {
 
 /* ---------- Confirmation dialog ---------- */
 /** Resolves true when the user confirms. Replaces window.confirm(), which embedded WebViews ignore. */
-function confirmDialog(message, {okLabel = 'Confirmar', danger = true} = {}) {
+/** Resolves true (the main button), false (cancel), or 'alt' when `altLabel` adds a second way to go ahead. */
+function confirmDialog(message, {okLabel = 'Confirmar', danger = true, altLabel = null} = {}) {
     return new Promise(resolve => {
         const root = $('#confirm-root');
         root.innerHTML = `<div class="overlay confirm-overlay"><div class="sheet confirm" role="alertdialog" aria-modal="true">
             <p class="confirm-text">${esc(message)}</p>
-            <div class="form-actions">
+            ${altLabel ? `<div class="form-actions stack">
+                <button type="button" class="btn danger-fill" id="confirm-alt">${esc(altLabel)}</button>
+                <button type="button" class="btn danger" id="confirm-yes">${esc(okLabel)}</button>
+                <button type="button" class="btn" id="confirm-no">Cancelar</button>
+            </div>` : `<div class="form-actions">
                 <button type="button" class="btn" id="confirm-no">Cancelar</button>
                 <button type="button" class="btn ${danger ? 'danger-fill' : 'primary'}" id="confirm-yes">${esc(okLabel)}</button>
-            </div></div></div>`;
+            </div>`}</div></div>`;
         const done = value => { layerClose('confirm'); root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); resolve(value); };
         const onKey = e => {
             if (e.key === 'Escape') { e.stopPropagation(); done(false); }
-            if (e.key === 'Enter') { e.preventDefault(); done(true); }
+            if (e.key === 'Enter' && !altLabel) { e.preventDefault(); done(true); }
         };
         document.addEventListener('keydown', onKey, true);
         layerOpen('confirm', () => done(false));
         $('#confirm-no', root).onclick = () => done(false);
         $('#confirm-yes', root).onclick = () => done(true);
+        if (altLabel) $('#confirm-alt', root).onclick = () => done('alt');
         $('.overlay', root).addEventListener('mousedown', e => { if (e.target.classList.contains('overlay')) done(false); });
         $('#confirm-no', root).focus();
     });
@@ -1189,6 +1207,7 @@ function openTransactionSheet(item, prefill) {
     const isTransfer = !!item && item.fromAccountId !== undefined;
     let mode = isTransfer ? 'TRANSFER' : (src ? src.type : 'EXPENSE');
     let status = item && !isTransfer ? item.status : 'PAID';
+    let statusTouched = editing; // until the person picks "Pago" or "A pagar" themselves, a future date means "A pagar"
     let categoryId = src && !isTransfer ? src.categoryId : null;
     let repeat = false; // "Repetir todo mês": the entry becomes a recurring payment instead of a one-off
     const date = item ? item.date : (monthOf(todayIso()) === state.month ? todayIso() : `${state.month}-01`);
@@ -1324,7 +1343,7 @@ function openTransactionSheet(item, prefill) {
             if (created) { categoryId = created.id; paintCats(); }
         };
     };
-    $$('.seg button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); paintStatus(); });
+    $$('.seg button', sheet).forEach(b => b.onclick = () => { mode = b.dataset.mode; paintMode(); autoStatus(); paintStatus(); });
     /** "Repetir todo mês": the date gives the day of the month and the first month; the end month list starts there. */
     function paintRepeat() {
         const first = (dateValue() || date).slice(0, 7);
@@ -1346,7 +1365,20 @@ function openTransactionSheet(item, prefill) {
     };
     $('#f-date', sheet).addEventListener('input', () => { if (repeat) paintRepeat(); });
     $('#f-date', sheet).addEventListener('change', () => { if (repeat) paintRepeat(); });
-    $$('#f-status .chip', sheet).forEach(b => b.onclick = () => { status = b.dataset.status; paintStatus(); if (installments() > 1) refreshPlan(); });
+    $$('#f-status .chip', sheet).forEach(b => b.onclick = () => { statusTouched = true; status = b.dataset.status; paintStatus(); if (installments() > 1) refreshPlan(); });
+    /** A new entry dated in the future is "A pagar" by default (it has not happened yet); today or the past is "Pago". */
+    const autoStatus = () => {
+        if (statusTouched || repeat || mode === 'TRANSFER') return;
+        const picked = dateValue();
+        if (!picked) return; // still typing
+        const wanted = picked > todayIso() ? 'PENDING' : 'PAID';
+        if (wanted === status) return;
+        status = wanted;
+        paintStatus();
+        if (installments() > 1) refreshPlan();
+    };
+    $('#f-date', sheet).addEventListener('input', autoStatus);
+    $('#f-date', sheet).addEventListener('change', autoStatus);
     $$('[data-tag]', sheet).forEach(b => b.onclick = () => {
         const input = $('#f-tags', sheet);
         if (!parseTags(input.value).includes(b.dataset.tag)) input.value = `${input.value.trim()} #${b.dataset.tag}`.trim();
@@ -1501,6 +1533,7 @@ function openTransactionSheet(item, prefill) {
     $('#f-to', sheet).addEventListener('change', paintToAmount);
     $('#f-amount', sheet).addEventListener('input', paintPlanHints);
     paintMode();
+    autoStatus();
     paintStatus();
     paintCats();
     if (!editing) setTimeout(() => $('#f-amount', sheet).focus(), 60);

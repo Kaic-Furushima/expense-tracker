@@ -275,6 +275,7 @@ button.row:hover { background: var(--surface-2); }
 .confirm { max-width: 380px; border-radius: 22px; padding-top: 22px; }
 .confirm-text { font-size: 1rem; margin-bottom: 16px; line-height: 1.45; }
 .confirm .form-actions .btn { flex: 1; }
+.confirm .form-actions.stack { flex-direction: column; }
 .btn.danger-fill { background: var(--expense); color: #fff; }
 
 /* Date shortcuts (WebView date field) */
@@ -433,6 +434,8 @@ select { appearance: auto; }
 .drag-handle { display: flex; align-items: center; justify-content: center; width: 36px; flex: none; border: 0; border-radius: var(--radius-sm, 10px); background: var(--surface-2); color: var(--muted, inherit); touch-action: none; cursor: grab; }
 .drag-handle:active { cursor: grabbing; }
 .manual-row { position: relative; }
+.manual-box { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.manual-box > * { flex: 1; min-width: 0; }
 .manual-row.dragging { z-index: 5; opacity: .92; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); border-radius: 12px; background: var(--surface); }
 .manual-row.drop-above { box-shadow: 0 -3px 0 var(--primary); }
 .manual-row.drop-below { box-shadow: 0 3px 0 var(--primary); }
